@@ -7,17 +7,16 @@ use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
 use Laravel\Socialite\Facades\Socialite;
+use Symfony\Component\HttpFoundation\RedirectResponse as SymfonyRedirectResponse;
 
 class GoogleAuthController extends Controller
 {
     /**
      * Redirect the user to the Google authentication page.
      */
-    public function redirectToGoogle(): RedirectResponse
+    public function redirectToGoogle(): SymfonyRedirectResponse
     {
         return Socialite::driver('google')->redirect();
     }
@@ -47,7 +46,6 @@ class GoogleAuthController extends Controller
 
         $email = $googleUser->getEmail();
         $googleId = (string) $googleUser->getId();
-        $name = $googleUser->getName() ?: ($googleUser->getNickname() ?: 'Google User');
         $avatar = $googleUser->getAvatar();
 
         if (empty($email)) {
@@ -56,40 +54,41 @@ class GoogleAuthController extends Controller
                 ->withErrors(['email' => 'Google account did not return a valid email address.']);
         }
 
-        // Look for existing user by google_id or email
-        $user = User::where('google_id', $googleId)->first();
+        // Must be a registered email existing in the database
+        $user = User::where('email', $email)->first();
 
         if (! $user) {
-            $user = User::where('email', $email)->first();
+            $user = User::whereRaw('LOWER(email) = ?', [strtolower($email)])->first();
         }
 
-        if ($user) {
-            $dirty = false;
-            if ($user->google_id !== $googleId) {
-                $user->google_id = $googleId;
-                $dirty = true;
-            }
-            if ($avatar && empty($user->avatar)) {
-                $user->avatar = $avatar;
-                $dirty = true;
-            }
-            if (empty($user->email_verified_at)) {
-                $user->email_verified_at = now();
-                $dirty = true;
-            }
-            if ($dirty) {
-                $user->save();
-            }
-        } else {
-            $user = User::create([
-                'name' => $name,
-                'email' => $email,
-                'google_id' => $googleId,
-                'avatar' => $avatar,
-                'voting_role' => 'voter',
-                'password' => Hash::make(Str::random(32)),
-                'email_verified_at' => now(),
-            ]);
+        if (! $user) {
+            return redirect()
+                ->route('login')
+                ->withErrors(['email' => 'This email is not registered in our database. Please contact an administrator.']);
+        }
+
+        // Account must be active (is_status = 1)
+        if ((int) $user->is_status !== 1) {
+            return redirect()
+                ->route('login')
+                ->withErrors(['email' => 'Your account is inactive. Please contact an administrator.']);
+        }
+
+        $dirty = false;
+        if ($user->google_id !== $googleId) {
+            $user->google_id = $googleId;
+            $dirty = true;
+        }
+        if ($avatar && empty($user->avatar)) {
+            $user->avatar = $avatar;
+            $dirty = true;
+        }
+        if ($dirty) {
+            $user->save();
+        }
+
+        if (! $user->hasVerifiedEmail()) {
+            $user->markEmailAsVerified();
         }
 
         Auth::login($user, remember: true);

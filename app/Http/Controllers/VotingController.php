@@ -953,7 +953,9 @@ class VotingController extends Controller
                 'display_number' => $shIndex++,
                 'name' => $voter?->display_name ?? ('Voter #' . ($shIndex - 1)),
                 'email' => $voter?->email,
-                'department' => $voter?->department ?? $voter?->section ?? null,
+                'designation' => $voter?->designation ?: ($voter?->position ?: null),
+                'section' => $voter?->section ?: ($voter?->division ?: null),
+                'department' => $voter?->section ?: ($voter?->division ?: ($voter?->department ?? null)),
                 'scores' => $nomineeScores,
             ];
         }

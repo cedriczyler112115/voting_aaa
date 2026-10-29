@@ -5,10 +5,12 @@ import {
     Briefcase,
     Building2,
     Calculator,
+    Calendar,
     CheckCircle2,
     Crown,
     HelpCircle,
     Info,
+    Lock,
     MapPin,
     Shield,
     Sparkles,
@@ -59,6 +61,8 @@ type SectionHeadVoter = {
     display_number: number;
     name: string;
     email?: string | null;
+    designation?: string | null;
+    section?: string | null;
     department?: string | null;
     scores: Record<
         number,
@@ -130,8 +134,24 @@ export default function TabulationBreakdown({
     section_heads,
     section_heads_summary,
     can_reveal,
+    is_reveal_date_reached = false,
 }: Props) {
     const [showCriteriaBreakdown, setShowCriteriaBreakdown] = useState(false);
+
+    const formatRevealDate = (dateStr?: string | null) => {
+        if (!dateStr) return null;
+        try {
+            const d = new Date(dateStr);
+            if (isNaN(d.getTime())) return dateStr;
+            return d.toLocaleDateString('en-US', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+            });
+        } catch {
+            return dateStr;
+        }
+    };
 
     const winners = nominees.filter((n) => n.rank === 1);
     const hasWinner = winners.length > 0;
@@ -425,132 +445,179 @@ export default function TabulationBreakdown({
                         </div>
 
                         <div className="flex items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setShowCriteriaBreakdown((prev) => !prev)}
-                                className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
-                            >
-                                <Info className="h-3.5 w-3.5 text-primary" />
-                                {showCriteriaBreakdown ? 'Hide Criteria Sub-Scores' : 'View Criteria Sub-Scores'}
-                            </button>
+                            {is_reveal_date_reached ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowCriteriaBreakdown((prev) => !prev)}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+                                >
+                                    <Info className="h-3.5 w-3.5 text-primary" />
+                                    {showCriteriaBreakdown ? 'Hide Criteria Sub-Scores' : 'View Criteria Sub-Scores'}
+                                </button>
+                            ) : (
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                                    <Lock className="h-3.5 w-3.5" />
+                                    Scores Sealed
+                                </span>
+                            )}
                         </div>
                     </div>
 
-                    {section_heads.length === 0 ? (
+                    {!is_reveal_date_reached ? (
+                        <div className="flex flex-col items-center justify-center p-8 sm:p-12 text-center bg-muted/5">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 shadow-sm mb-3.5">
+                                <Lock className="h-6 w-6" />
+                            </div>
+                            <h3 className="text-base font-bold text-foreground sm:text-lg">
+                                Individual Section Head Scores are Sealed
+                            </h3>
+                            <p className="mt-1.5 max-w-md text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                                Detailed ballots, individual score matrix, and Section Head evaluation criteria breakdown remain confidential and sealed until the official reveal date and grand announcement ceremony.
+                            </p>
+                            {event.reveal_date ? (
+                                <div className="mt-4 inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                                    <Calendar className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                                    <span>
+                                        Scheduled Reveal Date:{' '}
+                                        <span className="font-bold underline underline-offset-2">
+                                            {formatRevealDate(event.reveal_date)}
+                                        </span>
+                                    </span>
+                                </div>
+                            ) : (
+                                <div className="mt-4 inline-flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                                    <Sparkles className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                                    <span>To be announced during the Grand Announcement Ceremony</span>
+                                </div>
+                            )}
+                        </div>
+                    ) : section_heads.length === 0 ? (
                         <div className="p-8 text-center text-xs text-muted-foreground">
                             No Section Head votes have been recorded for this award yet.
                         </div>
                     ) : (
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-left text-xs text-foreground">
-                                <thead className="border-b border-border/60 bg-muted/50 font-semibold text-muted-foreground">
-                                    <tr>
-                                        <th className="px-4 py-3">Voter Name</th>
-                                        {nominees.map((nominee) => (
-                                            <th key={nominee.id} className="px-4 py-3 text-center min-w-[140px]">
-                                                <div className="font-bold text-foreground">{nominee.name}</div>
-                                                {nominee.department && (
-                                                    <div className="text-[10px] font-normal text-muted-foreground truncate">
-                                                        {nominee.department}
-                                                    </div>
-                                                )}
-                                            </th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-border/40">
-                                    {section_heads.map((sh) => (
-                                        <tr key={sh.voter_id} className="hover:bg-muted/30">
-                                            <td className="px-4 py-3">
-                                                <div className="font-bold text-foreground">
-                                                    {sh.name}
-                                                </div>
-                                                {sh.department && (
-                                                    <div className="text-[10px] text-muted-foreground">
-                                                        {sh.department}
-                                                    </div>
-                                                )}
-                                            </td>
-
-                                            {nominees.map((nominee) => {
-                                                const voteData = sh.scores[nominee.id];
-                                                const hasScore = voteData && voteData.score !== null;
-
-                                                return (
-                                                    <td key={nominee.id} className="px-4 py-3 text-center font-mono">
-                                                        {hasScore ? (
-                                                            <div>
-                                                                <span className="font-bold text-foreground">
-                                                                    {voteData.score} pts
-                                                                </span>
-                                                                {showCriteriaBreakdown && (
-                                                                    <div className="mt-1 flex flex-col gap-0.5 text-[9px] text-muted-foreground text-left bg-muted/40 p-1.5 rounded-md">
-                                                                        {criteria.map((crit) => (
-                                                                            <div key={crit.id} className="flex justify-between">
-                                                                                <span className="truncate pr-1">{crit.name}:</span>
-                                                                                <span className="font-bold text-foreground">
-                                                                                    {voteData.criteria_scores[crit.id] ?? 0}
-                                                                                </span>
-                                                                            </div>
-                                                                        ))}
-                                                                    </div>
-                                                                )}
-                                                            </div>
-                                                        ) : (
-                                                            <span className="text-muted-foreground italic text-[11px]">-</span>
-                                                        )}
-                                                    </td>
-                                                );
-                                            })}
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs text-foreground">
+                                    <thead className="border-b border-border/60 bg-muted/50 font-semibold text-muted-foreground">
+                                        <tr>
+                                            <th className="px-4 py-3">Voter Name</th>
+                                            {nominees.map((nominee) => (
+                                                <th key={nominee.id} className="px-4 py-3 text-center min-w-[140px]">
+                                                    <div className="font-bold text-foreground">{nominee.name}</div>
+                                                    {nominee.department && (
+                                                        <div className="text-[10px] font-normal text-muted-foreground truncate">
+                                                            {nominee.department}
+                                                        </div>
+                                                    )}
+                                                </th>
+                                            ))}
                                         </tr>
-                                    ))}
-                                </tbody>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/40">
+                                        {section_heads.map((sh) => (
+                                            <tr key={sh.voter_id} className="hover:bg-muted/30">
+                                                <td className="px-4 py-3">
+                                                    <div className="font-bold text-foreground">
+                                                        {sh.name}
+                                                    </div>
+                                                    {sh.designation && (
+                                                        <div className="text-[11px] font-medium text-foreground/80">
+                                                            {sh.designation}
+                                                        </div>
+                                                    )}
+                                                    {sh.section && (
+                                                        <div className="text-[10px] text-muted-foreground">
+                                                            {sh.section}
+                                                        </div>
+                                                    )}
+                                                    {!sh.designation && !sh.section && sh.department && (
+                                                        <div className="text-[10px] text-muted-foreground">
+                                                            {sh.department}
+                                                        </div>
+                                                    )}
+                                                </td>
 
-                                {/* Summary Rows: Total, Average, Weighted */}
-                                <tfoot className="border-t-2 border-border/80 bg-muted/40 font-mono">
-                                    {/* Total Score Row */}
-                                    <tr className="border-b border-border/40 font-bold">
-                                        <td className="px-4 py-2.5 text-xs text-foreground uppercase tracking-wider">
-                                            Total Score
-                                        </td>
-                                        {nominees.map((nominee) => (
-                                            <td key={nominee.id} className="px-4 py-2.5 text-center text-xs font-black text-foreground">
-                                                {section_heads_summary[nominee.id]?.total_score ?? '0.00'}
-                                            </td>
-                                        ))}
-                                    </tr>
+                                                {nominees.map((nominee) => {
+                                                    const voteData = sh.scores[nominee.id];
+                                                    const hasScore = voteData && voteData.score !== null;
 
-                                    {/* Average Score Row */}
-                                    <tr className="border-b border-border/40 font-bold">
-                                        <td className="px-4 py-2.5 text-xs text-foreground uppercase tracking-wider">
-                                            Average Score
-                                        </td>
-                                        {nominees.map((nominee) => (
-                                            <td key={nominee.id} className="px-4 py-2.5 text-center text-xs font-extrabold text-primary">
-                                                {section_heads_summary[nominee.id]?.average_score ?? '0.00'}
-                                            </td>
+                                                    return (
+                                                        <td key={nominee.id} className="px-4 py-3 text-center font-mono">
+                                                            {hasScore ? (
+                                                                <div>
+                                                                    <span className="font-bold text-foreground">
+                                                                        {voteData.score} pts
+                                                                    </span>
+                                                                    {showCriteriaBreakdown && (
+                                                                        <div className="mt-1 flex flex-col gap-0.5 text-[9px] text-muted-foreground text-left bg-muted/40 p-1.5 rounded-md">
+                                                                            {criteria.map((crit) => (
+                                                                                <div key={crit.id} className="flex justify-between">
+                                                                                    <span className="truncate pr-1">{crit.name}:</span>
+                                                                                    <span className="font-bold text-foreground">
+                                                                                        {voteData.criteria_scores[crit.id] ?? 0}
+                                                                                    </span>
+                                                                                </div>
+                                                                            ))}
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ) : (
+                                                                <span className="text-muted-foreground italic text-[11px]">-</span>
+                                                            )}
+                                                        </td>
+                                                    );
+                                                })}
+                                            </tr>
                                         ))}
-                                    </tr>
+                                    </tbody>
 
-                                    {/* Weighted Score (50%) Row */}
-                                    <tr className="bg-primary/5 font-black text-primary">
-                                        <td className="px-4 py-3 text-xs uppercase tracking-wider">
-                                            Weighted Score (50%)
-                                        </td>
-                                        {nominees.map((nominee) => (
-                                            <td key={nominee.id} className="px-4 py-3 text-center text-sm">
-                                                {section_heads_summary[nominee.id]?.weighted_score ?? '0.00'}%
+                                    {/* Summary Rows: Total, Average, Weighted */}
+                                    <tfoot className="border-t-2 border-border/80 bg-muted/40 font-mono">
+                                        {/* Total Score Row */}
+                                        <tr className="border-b border-border/40 font-bold">
+                                            <td className="px-4 py-2.5 text-xs text-foreground uppercase tracking-wider">
+                                                Total Score
                                             </td>
-                                        ))}
-                                    </tr>
-                                </tfoot>
-                            </table>
-                        </div>
+                                            {nominees.map((nominee) => (
+                                                <td key={nominee.id} className="px-4 py-2.5 text-center text-xs font-black text-foreground">
+                                                    {section_heads_summary[nominee.id]?.total_score ?? '0.00'}
+                                                </td>
+                                            ))}
+                                        </tr>
+
+                                        {/* Average Score Row */}
+                                        <tr className="border-b border-border/40 font-bold">
+                                            <td className="px-4 py-2.5 text-xs text-foreground uppercase tracking-wider">
+                                                Average Score
+                                            </td>
+                                            {nominees.map((nominee) => (
+                                                <td key={nominee.id} className="px-4 py-2.5 text-center text-xs font-extrabold text-primary">
+                                                    {section_heads_summary[nominee.id]?.average_score ?? '0.00'}
+                                                </td>
+                                            ))}
+                                        </tr>
+
+                                        {/* Weighted Score (50%) Row */}
+                                        <tr className="bg-primary/5 font-black text-primary">
+                                            <td className="px-4 py-3 text-xs uppercase tracking-wider">
+                                                Weighted Score (50%)
+                                            </td>
+                                            {nominees.map((nominee) => (
+                                                <td key={nominee.id} className="px-4 py-3 text-center text-sm">
+                                                    {section_heads_summary[nominee.id]?.weighted_score ?? '0.00'}%
+                                                </td>
+                                            ))}
+                                        </tr>
+                                    </tfoot>
+                                </table>
+                            </div>
+
+                            <div className="border-t border-border/60 bg-muted/20 p-3.5 text-xs text-muted-foreground">
+                                <span className="font-semibold text-foreground">Formula:</span> Average Score = Total of Section Heads' Scores ÷ Number of Section Heads. Weighted Score = Average Score × 50%.
+                            </div>
+                        </>
                     )}
-
-                    <div className="border-t border-border/60 bg-muted/20 p-3.5 text-xs text-muted-foreground">
-                        <span className="font-semibold text-foreground">Formula:</span> Average Score = Total of Section Heads' Scores ÷ Number of Section Heads. Weighted Score = Average Score × 50%.
-                    </div>
                 </div>
 
                 {/* Section 3: Division Chief (User ID = 2) Score Breakdown (Matching Section 3 of Sample Matrix) */}
@@ -570,77 +637,117 @@ export default function TabulationBreakdown({
                             </div>
                         </div>
 
-                        <span className="rounded-full bg-emerald-500/10 px-3 py-1 font-mono text-xs font-bold text-emerald-700 dark:text-emerald-300">
-                            50% Weight Share
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className="rounded-full bg-emerald-500/10 px-3 py-1 font-mono text-xs font-bold text-emerald-700 dark:text-emerald-300">
+                                50% Weight Share
+                            </span>
+                            {!is_reveal_date_reached && (
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                                    <Lock className="h-3.5 w-3.5" />
+                                    Scores Sealed
+                                </span>
+                            )}
+                        </div>
                     </div>
 
-                    <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs text-foreground">
-                            <thead className="border-b border-border/60 bg-muted/50 font-semibold text-muted-foreground">
-                                <tr>
-                                    <th className="px-4 py-3">Nominee</th>
-                                    {criteria.map((crit) => (
-                                        <th key={crit.id} className="px-4 py-3 text-right">
-                                            <div>{crit.name}</div>
-                                            <span className="text-[10px] text-muted-foreground font-normal">
-                                                Max {crit.max_score} pts
-                                            </span>
-                                        </th>
-                                    ))}
-                                    <th className="px-4 py-3 text-right font-bold text-foreground">DC Total Score</th>
-                                    <th className="px-4 py-3 text-right font-black text-emerald-600 dark:text-emerald-400">
-                                        DC Weighted (50%)
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-border/40">
-                                {nominees.map((nominee) => {
-                                    const dcData = division_chief.scores[nominee.id];
-                                    const hasVoted = dcData && dcData.has_voted;
+                    {!is_reveal_date_reached ? (
+                        <div className="flex flex-col items-center justify-center p-8 sm:p-12 text-center bg-muted/5">
+                            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 shadow-sm mb-3.5">
+                                <Lock className="h-6 w-6" />
+                            </div>
+                            <h3 className="text-base font-bold text-foreground sm:text-lg">
+                                Division Chief Evaluation Breakdown is Sealed
+                            </h3>
+                            <p className="mt-1.5 max-w-md text-xs sm:text-sm text-muted-foreground leading-relaxed">
+                                The Division Chief's itemized criteria evaluations, rubric sub-scores, and weighted ratings are strictly confidential and will be officially unlocked on the scheduled reveal date.
+                            </p>
+                            {event.reveal_date ? (
+                                <div className="mt-4 inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                                    <Calendar className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                                    <span>
+                                        Scheduled Reveal Date:{' '}
+                                        <span className="font-bold underline underline-offset-2">
+                                            {formatRevealDate(event.reveal_date)}
+                                        </span>
+                                    </span>
+                                </div>
+                            ) : (
+                                <div className="mt-4 inline-flex items-center gap-1.5 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
+                                    <Sparkles className="h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                                    <span>To be announced during the Grand Announcement Ceremony</span>
+                                </div>
+                            )}
+                        </div>
+                    ) : (
+                        <>
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-left text-xs text-foreground">
+                                    <thead className="border-b border-border/60 bg-muted/50 font-semibold text-muted-foreground">
+                                        <tr>
+                                            <th className="px-4 py-3">Nominee</th>
+                                            {criteria.map((crit) => (
+                                                <th key={crit.id} className="px-4 py-3 text-right">
+                                                    <div>{crit.name}</div>
+                                                    <span className="text-[10px] text-muted-foreground font-normal">
+                                                        Max {crit.max_score} pts
+                                                    </span>
+                                                </th>
+                                            ))}
+                                            <th className="px-4 py-3 text-right font-bold text-foreground">DC Total Score</th>
+                                            <th className="px-4 py-3 text-right font-black text-emerald-600 dark:text-emerald-400">
+                                                DC Weighted (50%)
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-border/40">
+                                        {nominees.map((nominee) => {
+                                            const dcData = division_chief.scores[nominee.id];
+                                            const hasVoted = dcData && dcData.has_voted;
 
-                                    return (
-                                        <tr key={nominee.id} className="hover:bg-muted/30">
-                                            <td className="px-4 py-3.5">
-                                                <div className="font-bold text-foreground">{nominee.name}</div>
-                                                {nominee.department && (
-                                                    <div className="text-[11px] text-muted-foreground">
-                                                        {nominee.department}
-                                                    </div>
-                                                )}
-                                            </td>
-
-                                            {criteria.map((crit) => {
-                                                const score = dcData?.criteria_scores[crit.id];
-
-                                                return (
-                                                    <td key={crit.id} className="px-4 py-3.5 text-right font-mono">
-                                                        {hasVoted && score !== undefined ? (
-                                                            `${score} pts`
-                                                        ) : (
-                                                            <span className="text-muted-foreground italic">-</span>
+                                            return (
+                                                <tr key={nominee.id} className="hover:bg-muted/30">
+                                                    <td className="px-4 py-3.5">
+                                                        <div className="font-bold text-foreground">{nominee.name}</div>
+                                                        {nominee.department && (
+                                                            <div className="text-[11px] text-muted-foreground">
+                                                                {nominee.department}
+                                                            </div>
                                                         )}
                                                     </td>
-                                                );
-                                            })}
 
-                                            <td className="px-4 py-3.5 text-right font-mono text-xs font-bold text-foreground">
-                                                {hasVoted ? `${dcData.score} pts` : <span className="text-muted-foreground italic">Pending</span>}
-                                            </td>
+                                                    {criteria.map((crit) => {
+                                                        const score = dcData?.criteria_scores[crit.id];
 
-                                            <td className="px-4 py-3.5 text-right font-mono text-sm font-black text-emerald-600 dark:text-emerald-400">
-                                                {hasVoted ? `${dcData.weighted_score.toFixed(2)}%` : '0.00%'}
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
+                                                        return (
+                                                            <td key={crit.id} className="px-4 py-3.5 text-right font-mono">
+                                                                {hasVoted && score !== undefined ? (
+                                                                    `${score} pts`
+                                                                ) : (
+                                                                    <span className="text-muted-foreground italic">-</span>
+                                                                )}
+                                                            </td>
+                                                        );
+                                                    })}
 
-                    <div className="border-t border-border/60 bg-muted/20 p-3.5 text-xs text-muted-foreground">
-                        <span className="font-semibold text-foreground">Formula:</span> DC Weighted Score = DC Total Score × 50%.
-                    </div>
+                                                    <td className="px-4 py-3.5 text-right font-mono text-xs font-bold text-foreground">
+                                                        {hasVoted ? `${dcData.score} pts` : <span className="text-muted-foreground italic">Pending</span>}
+                                                    </td>
+
+                                                    <td className="px-4 py-3.5 text-right font-mono text-sm font-black text-emerald-600 dark:text-emerald-400">
+                                                        {hasVoted ? `${dcData.weighted_score.toFixed(2)}%` : '0.00%'}
+                                                    </td>
+                                                </tr>
+                                            );
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <div className="border-t border-border/60 bg-muted/20 p-3.5 text-xs text-muted-foreground">
+                                <span className="font-semibold text-foreground">Formula:</span> DC Weighted Score = DC Total Score × 50%.
+                            </div>
+                        </>
+                    )}
                 </div>
 
                 {/* Section 4: Evaluation Criteria Reference Rubric */}

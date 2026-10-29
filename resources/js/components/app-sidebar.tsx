@@ -23,9 +23,11 @@ import {
     SidebarMenuButton,
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
+import { useCurrentUrl } from '@/hooks/use-current-url';
 import type { NavItem } from '@/types';
 
 export function AppSidebar() {
+    const { isCurrentOrParentUrl } = useCurrentUrl();
     const { auth } = usePage().props;
     const isAdmin = Boolean(
         auth?.user?.is_admin || auth?.user?.role === 'admin',
@@ -41,6 +43,7 @@ export function AppSidebar() {
             title: 'Tabulation Result',
             href: '/tabulation-results',
             icon: Trophy,
+            isActive: isCurrentOrParentUrl('/tabulation-results'),
         },
         {
             title: 'My Voting History',

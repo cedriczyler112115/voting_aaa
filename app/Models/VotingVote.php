@@ -28,6 +28,7 @@ class VotingVote extends Model
         'voting_event_id',
         'voting_award_id',
         'voting_nominee_id',
+        'score',
         'rank',
         'voted_at',
         'ip_address',
@@ -37,9 +38,18 @@ class VotingVote extends Model
     protected function casts(): array
     {
         return [
+            'score' => 'float',
             'rank' => 'integer',
             'voted_at' => 'datetime',
         ];
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<VotingVoteScore, $this>
+     */
+    public function scores(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(VotingVoteScore::class, 'voting_vote_id');
     }
 
     /**

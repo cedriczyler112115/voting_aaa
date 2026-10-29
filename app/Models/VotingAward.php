@@ -150,8 +150,8 @@ class VotingAward extends Model
     }
 
     /**
-     * Get nominees sorted and ranked:
-     * Nominees with the same total points (average score) share the same rank and are marked as tied.
+     * Get nominees sorted and ranked based on 50% DC (user_id=2) + 50% Section Heads average formula.
+     * Nominees with the same final score share the same rank and are marked as tied.
      *
      * @return \Illuminate\Support\Collection<int, VotingNominee>
      */
@@ -168,10 +168,34 @@ class VotingAward extends Model
         $stats = [];
         foreach ($nominees as $nominee) {
             $votes = $nominee->relationLoaded('votes') ? $nominee->votes : $nominee->votes()->get();
-            $totalPoints = (int) $votes->sum('rank');
+
+            // Division Chief (user.id = 2)
+            $dcVote = $votes->firstWhere('voter_id', 2);
+            $dcScore = $dcVote ? (float) $dcVote->score : 0.0;
+            $dcWeightedScore = round($dcScore * 0.50, 2);
+            $dcHasVoted = $dcVote !== null;
+
+            // Section Heads / Other Voters (voter_id != 2)
+            $shVotes = $votes->where('voter_id', '!=', 2);
+            $shCount = $shVotes->count();
+            $shTotal = (float) $shVotes->sum('score');
+            $shAverage = $shCount > 0 ? round($shTotal / $shCount, 2) : 0.0;
+            $shWeightedScore = round($shAverage * 0.50, 2);
+
+            // Final Score = (DC Score * 0.50) + (Section Heads Average * 0.50)
+            $finalScore = round($dcWeightedScore + $shWeightedScore, 2);
 
             $stats[$nominee->id] = [
-                'total_points' => $totalPoints,
+                'dc_score' => $dcScore,
+                'dc_weighted_score' => $dcWeightedScore,
+                'dc_has_voted' => $dcHasVoted,
+                'sh_count' => $shCount,
+                'sh_total' => $shTotal,
+                'sh_average' => $shAverage,
+                'sh_weighted_score' => $shWeightedScore,
+                'final_score' => $finalScore,
+                'total_points' => $votes->sum('score'),
+                'ballots_count' => $votes->count(),
             ];
         }
 
@@ -179,12 +203,22 @@ class VotingAward extends Model
             $statsA = $stats[$a->id];
             $statsB = $stats[$b->id];
 
-            // 1. Total points (average score) descending
-            if ($statsA['total_points'] !== $statsB['total_points']) {
-                return $statsB['total_points'] <=> $statsA['total_points'];
+            // 1. Final score descending
+            if ($statsA['final_score'] !== $statsB['final_score']) {
+                return $statsB['final_score'] <=> $statsA['final_score'];
             }
 
-            // 2. Display order ascending, then ID ascending
+            // 2. Division Chief score descending
+            if ($statsA['dc_score'] !== $statsB['dc_score']) {
+                return $statsB['dc_score'] <=> $statsA['dc_score'];
+            }
+
+            // 3. Section heads average descending
+            if ($statsA['sh_average'] !== $statsB['sh_average']) {
+                return $statsB['sh_average'] <=> $statsA['sh_average'];
+            }
+
+            // 4. Display order ascending, then ID ascending
             if ($a->display_order !== $b->display_order) {
                 return $a->display_order <=> $b->display_order;
             }
@@ -192,18 +226,29 @@ class VotingAward extends Model
             return $a->id <=> $b->id;
         })->values();
 
-        // Assign standard competition ranks and tie flags based on average/total score
+        // Assign standard competition ranks and tie flags based on final score
         $currentRank = 1;
         foreach ($sorted as $i => $nominee) {
+            $currStat = $stats[$nominee->id];
+            $nominee->dc_score = $currStat['dc_score'];
+            $nominee->dc_weighted_score = $currStat['dc_weighted_score'];
+            $nominee->dc_has_voted = $currStat['dc_has_voted'];
+            $nominee->sh_count = $currStat['sh_count'];
+            $nominee->sh_total = $currStat['sh_total'];
+            $nominee->sh_average = $currStat['sh_average'];
+            $nominee->sh_weighted_score = $currStat['sh_weighted_score'];
+            $nominee->final_score = $currStat['final_score'];
+            $nominee->total_points = $currStat['total_points'];
+            $nominee->ballots_count = $currStat['ballots_count'];
+
             if ($i === 0) {
                 $nominee->computed_rank = 1;
                 $nominee->is_tied = false;
             } else {
                 $prev = $sorted[$i - 1];
                 $statsPrev = $stats[$prev->id];
-                $statsCurr = $stats[$nominee->id];
 
-                $isTied = ($statsCurr['total_points'] === $statsPrev['total_points']);
+                $isTied = ($currStat['final_score'] === $statsPrev['final_score']);
 
                 if ($isTied) {
                     $nominee->computed_rank = $currentRank;

@@ -120,6 +120,14 @@ class VotingEvent extends Model
     }
 
     /**
+     * @return HasMany<VotingCriterion, $this>
+     */
+    public function criteria(): HasMany
+    {
+        return $this->hasMany(VotingCriterion::class, 'voting_event_id')->orderBy('display_order')->orderBy('id');
+    }
+
+    /**
      * Compute current operational status.
      */
     public function getComputedStatusAttribute(): string

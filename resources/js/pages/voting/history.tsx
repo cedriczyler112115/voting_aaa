@@ -20,8 +20,10 @@ type VoteHistoryItem = {
     nominee_name: string;
     nominee_department: string | null;
     nominee_organization: string | null;
-    rank?: number;
+    rank?: number | null;
     rank_label?: string;
+    score?: number;
+    score_formatted?: string;
     voted_at: string;
 };
 
@@ -240,7 +242,7 @@ export default function VotingHistory({
                                         </th>
                                         <th className="px-6 py-4">Nominee</th>
                                         <th className="px-6 py-4">
-                                            Assigned Rank
+                                            Given Score / %
                                         </th>
                                         <th className="px-6 py-4">
                                             Recorded At
@@ -308,14 +310,20 @@ export default function VotingHistory({
                                                 )}
                                             </td>
                                             <td className="px-6 py-4">
-                                                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
-                                                    Rank {vote.rank ?? 1}
-                                                    {vote.rank && (
-                                                        <span className="font-normal opacity-75">
-                                                            ({vote.rank} pts)
+                                                {vote.score !== undefined && vote.score !== null ? (
+                                                    <div className="flex flex-col gap-0.5">
+                                                        <span className="inline-flex items-center gap-1 font-mono text-sm font-bold text-primary">
+                                                            {vote.score.toFixed(2)}%
                                                         </span>
-                                                    )}
-                                                </span>
+                                                        <span className="text-[11px] text-muted-foreground">
+                                                            Criteria Score: {vote.score.toFixed(1)}/100
+                                                        </span>
+                                                    </div>
+                                                ) : (
+                                                    <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-bold text-primary">
+                                                        Rank {vote.rank ?? 1}
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="px-6 py-4 text-xs whitespace-nowrap text-muted-foreground">
                                                 <div className="flex items-center gap-1.5">

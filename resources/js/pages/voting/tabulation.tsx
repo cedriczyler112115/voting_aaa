@@ -1,7 +1,8 @@
-import { Head, router } from '@inertiajs/react';
+import { Head, Link, router } from '@inertiajs/react';
 import {
     Briefcase,
     Building2,
+    Calculator,
     Crown,
     MapPin,
     Sparkles,
@@ -18,11 +19,18 @@ type NomineeResult = {
     organization: string | null;
     status: string;
     votes_count: number;
-    average_score?: string | number;
-    percentage: number;
+    final_score: string;
+    final_score_num: number;
+    dc_score: string;
+    dc_weighted_score: string;
+    dc_has_voted: boolean;
+    sh_count: number;
+    sh_average: string;
+    sh_weighted_score: string;
     rank: number;
     is_tied?: boolean;
     is_masked?: boolean;
+    is_winner?: boolean;
 };
 
 type AwardResult = {
@@ -188,9 +196,11 @@ export default function TabulationResult({
                                         const firstWinner = winners[0];
 
                                         return (
-                                            <div
+                                            <Link
                                                 key={award.id}
-                                                className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-emerald-500/40 bg-card p-2.5 shadow-sm transition-all hover:border-emerald-500/70 hover:shadow-md"
+                                                href={`/tabulation-results/breakdown/${award.id}`}
+                                                className="group relative flex flex-col justify-between overflow-hidden rounded-xl border border-emerald-500/40 bg-card p-3 shadow-sm transition-all hover:border-emerald-500 hover:shadow-lg hover:ring-2 hover:ring-emerald-500/30 cursor-pointer"
+                                                title={`Click to view computation breakdown for ${award.name}`}
                                             >
                                                 <div>
                                                     <div className="flex items-center justify-between gap-1">
@@ -245,7 +255,7 @@ export default function TabulationResult({
 
                                                                     <div className="min-w-0 flex-1">
                                                                         <div
-                                                                            className="truncate text-xs font-bold text-foreground"
+                                                                            className="truncate text-xs font-bold text-foreground transition-colors group-hover:text-emerald-600 dark:group-hover:text-emerald-400"
                                                                             title={winner.name}
                                                                         >
                                                                             {winner.name}
@@ -287,20 +297,26 @@ export default function TabulationResult({
                                                     </div>
                                                 </div>
 
-                                                <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-2 text-[11px] font-semibold">
-                                                    <span className="text-[10px] text-muted-foreground">
-                                                        {isTie ? 'Tie Score:' : 'Score:'}
-                                                    </span>
-                                                    <div className="flex items-center gap-1">
-                                                        <span className="text-xs font-extrabold text-foreground">
-                                                            {firstWinner.average_score ?? firstWinner.votes_count} avg
-                                                        </span>
+                                                <div>
+                                                    <div className="mt-2.5 flex items-center justify-between border-t border-border/60 pt-2 text-[11px] font-semibold">
                                                         <span className="text-[10px] text-muted-foreground">
-                                                            ({firstWinner.percentage}%)
+                                                            {isTie ? 'Tie Final Score:' : 'Final Score:'}
                                                         </span>
+                                                        <div className="flex items-center gap-1">
+                                                            <span className="font-mono text-xs font-black text-foreground">
+                                                                {firstWinner.final_score}%
+                                                            </span>
+                                                            <span className="text-[10px] text-muted-foreground">
+                                                                (DC {firstWinner.dc_weighted_score}% + SH {firstWinner.sh_weighted_score}%)
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="mt-2 flex items-center justify-center gap-1 rounded-md bg-emerald-500/10 py-1 text-[10px] font-semibold text-emerald-700 transition-colors group-hover:bg-emerald-600 group-hover:text-white dark:text-emerald-300">
+                                                        <Calculator className="h-3 w-3" />
+                                                        <span>View Computation Breakdown &rarr;</span>
                                                     </div>
                                                 </div>
-                                            </div>
+                                            </Link>
                                         );
                                     })}
                                 </div>
@@ -319,13 +335,23 @@ export default function TabulationResult({
                                         key={award.id}
                                         className="overflow-hidden rounded-2xl border border-border bg-card p-4 shadow-sm"
                                     >
-                                        <div className="border-b border-border/50 pb-3">
-                                            <span className="text-[10px] font-bold tracking-wider text-muted-foreground uppercase">
-                                                Category {index + 1}
-                                            </span>
-                                            <h3 className="mt-0.5 truncate text-base font-bold text-foreground" title={award.name}>
-                                                {award.name}
-                                            </h3>
+                                        <div className="flex items-start justify-between gap-2 border-b border-border/50 pb-3">
+                                            <div className="min-w-0">
+                                                <span className="text-[10px] font-bold tracking-wider text-muted-foreground uppercase">
+                                                    Category {index + 1}
+                                                </span>
+                                                <h3 className="mt-0.5 truncate text-base font-bold text-foreground" title={award.name}>
+                                                    {award.name}
+                                                </h3>
+                                            </div>
+                                            <Link
+                                                href={`/tabulation-results/breakdown/${award.id}`}
+                                                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-border/80 bg-muted/60 px-2 py-1 text-[10px] font-semibold text-foreground transition-colors hover:border-emerald-500/50 hover:bg-emerald-500/10 hover:text-emerald-600 dark:hover:text-emerald-400"
+                                                title="View computation breakdown"
+                                            >
+                                                <Calculator className="h-3 w-3" />
+                                                <span>Computation &rarr;</span>
+                                            </Link>
                                         </div>
 
                                         <div className="mt-3.5 flex flex-col gap-2">
@@ -422,11 +448,11 @@ export default function TabulationResult({
                                                                 </div>
 
                                                                 <div className="shrink-0 text-right">
-                                                                    <div className="text-xs font-extrabold text-foreground">
-                                                                        {nominee.average_score ?? nominee.votes_count} avg
+                                                                    <div className="font-mono text-xs font-black text-foreground">
+                                                                        {nominee.final_score}%
                                                                     </div>
-                                                                    <div className="text-[10px] font-semibold text-muted-foreground">
-                                                                        {nominee.percentage}%
+                                                                    <div className="text-[10px] text-muted-foreground">
+                                                                        DC {nominee.dc_has_voted ? nominee.dc_weighted_score : '0.00'}% | SH {nominee.sh_weighted_score}%
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -439,10 +465,24 @@ export default function TabulationResult({
                                                                             : 'bg-primary'
                                                                     }`}
                                                                     style={{
-                                                                        width: `${nominee.percentage}%`,
+                                                                        width: `${Math.min(100, Math.max(0, nominee.final_score_num))}%`,
                                                                     }}
                                                                 />
                                                             </div>
+
+                                                            {isLeader && (
+                                                                <Link
+                                                                    href={`/tabulation-results/breakdown/${award.id}`}
+                                                                    className="mt-2 flex items-center justify-between rounded-lg bg-emerald-500/10 px-2 py-1 text-[10px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-300"
+                                                                    title="View winner computation breakdown"
+                                                                >
+                                                                    <span className="flex items-center gap-1">
+                                                                        <Crown className="h-3 w-3 text-emerald-600 dark:text-emerald-400" />
+                                                                        Winner Computation Breakdown
+                                                                    </span>
+                                                                    <span>&rarr;</span>
+                                                                </Link>
+                                                            )}
                                                         </div>
                                                     );
                                                 })

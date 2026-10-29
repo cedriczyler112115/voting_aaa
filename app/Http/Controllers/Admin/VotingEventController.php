@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\VotingAuditLog;
 use App\Models\VotingAward;
+use App\Models\VotingCriterion;
 use App\Models\VotingEvent;
 use App\Models\VotingNominee;
 use App\Models\VotingUserEligibility;
@@ -103,6 +104,7 @@ class VotingEventController extends Controller
     public function show(VotingEvent $event): Response
     {
         $event->load([
+            'criteria',
             'awards' => function ($q) {
                 $q->withCount(['nominees', 'votes'])
                     ->orderBy('display_order')
@@ -163,6 +165,14 @@ class VotingEventController extends Controller
                 'created_at' => $event->created_at->format('M d, Y H:i'),
                 'total_awards' => $event->awards->count(),
                 'total_votes' => $event->awards->sum('votes_count'),
+                'total_criteria_score' => (float) $event->criteria->sum('max_score'),
+                'criteria' => $event->criteria->map(fn (VotingCriterion $c) => [
+                    'id' => $c->id,
+                    'name' => $c->name,
+                    'description' => $c->description,
+                    'max_score' => (float) $c->max_score,
+                    'display_order' => $c->display_order,
+                ]),
                 'allowed_voters_count' => $allowedVoters->where('is_eligible', true)->count(),
                 'allowed_voters' => $allowedVoters,
                 'awards' => $event->awards->map(fn (VotingAward $award) => [

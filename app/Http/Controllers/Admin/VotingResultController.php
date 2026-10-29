@@ -49,17 +49,11 @@ class VotingResultController extends Controller
                     ->get();
 
                 $awardsData = $awards->map(function (VotingAward $award) {
-                    $totalPoints = $award->nominees->sum(fn ($nominee) => $nominee->votes->sum('rank'));
+                    $totalPoints = $award->nominees->sum(fn ($nominee) => $nominee->votes->sum('score'));
                     $distinctBallots = VotingVote::where('voting_award_id', $award->id)->distinct('voter_id')->count('voter_id');
 
                     $nominees = $award->getSortedNominees()
-                        ->map(function (VotingNominee $nominee, int $index) use ($totalPoints, $distinctBallots) {
-                            $points = (int) $nominee->votes->sum('rank');
-                            $ballots = $nominee->votes->count();
-                            $percentage = $totalPoints > 0 ? round(($points / $totalPoints) * 100, 1) : 0;
-                            $averageScore = $distinctBallots > 0 ? round($points / $distinctBallots, 2) : 0.0;
-                            $averageFormatted = number_format($averageScore, 2, '.', '');
-
+                        ->map(function (VotingNominee $nominee, int $index) {
                             return [
                                 'id' => $nominee->id,
                                 'name' => $nominee->name,
@@ -67,12 +61,16 @@ class VotingResultController extends Controller
                                 'department' => $nominee->department,
                                 'organization' => $nominee->organization,
                                 'status' => $nominee->status,
-                                'votes_count' => $points,
-                                'total_points' => $points,
-                                'average_score' => $averageFormatted,
-                                'average_score_num' => $averageScore,
-                                'ballots_count' => $ballots,
-                                'percentage' => $percentage,
+                                'votes_count' => $nominee->ballots_count,
+                                'total_points' => $nominee->total_points,
+                                'final_score' => number_format((float) $nominee->final_score, 2),
+                                'final_score_num' => (float) $nominee->final_score,
+                                'dc_score' => number_format((float) $nominee->dc_score, 2),
+                                'dc_weighted_score' => number_format((float) $nominee->dc_weighted_score, 2),
+                                'dc_has_voted' => (bool) $nominee->dc_has_voted,
+                                'sh_count' => (int) $nominee->sh_count,
+                                'sh_average' => number_format((float) $nominee->sh_average, 2),
+                                'sh_weighted_score' => number_format((float) $nominee->sh_weighted_score, 2),
                                 'rank' => $nominee->computed_rank ?? ($index + 1),
                                 'is_tied' => (bool) ($nominee->is_tied ?? false),
                             ];
@@ -145,42 +143,37 @@ class VotingResultController extends Controller
             fputcsv($handle, ['Voting Event', $event->title]);
             fputcsv($handle, ['Status', $event->computed_status]);
             fputcsv($handle, ['Generated At', now()->toDateTimeString()]);
+            fputcsv($handle, ['Scoring Formula', 'Final Score = (DC Score * 0.50) + (Section Heads Average * 0.50)']);
             fputcsv($handle, []);
 
             fputcsv($handle, [
-                'Award Name',
+                'Award Category',
                 'Rank',
                 'Nominee Name',
-                'Department',
-                'Average Score',
-                'Total Points',
-                'Ballots Count',
-                'Percentage (%)',
-                'Total Award Points',
+                'Department / Section',
+                'DC Score (out of 100)',
+                'DC Weighted Score (50%)',
+                "Section Heads' Average Score",
+                'SH Weighted Score (50%)',
+                'Final Score (Weighted 100%)',
+                'Section Heads Count',
             ]);
 
             foreach ($awards as $award) {
-                $totalPoints = $award->nominees->sum(fn ($nominee) => $nominee->votes->sum('rank'));
-                $distinctBallots = VotingVote::where('voting_award_id', $award->id)->distinct('voter_id')->count('voter_id');
                 $sortedNominees = $award->getSortedNominees();
 
                 foreach ($sortedNominees as $index => $nominee) {
-                    $points = (int) $nominee->votes->sum('rank');
-                    $ballots = $nominee->votes->count();
-                    $percentage = $totalPoints > 0 ? round(($points / $totalPoints) * 100, 1) : 0;
-                    $averageScore = $distinctBallots > 0 ? round($points / $distinctBallots, 2) : 0.0;
-                    $averageFormatted = number_format($averageScore, 2, '.', '');
-
                     fputcsv($handle, [
                         $award->name,
                         $nominee->computed_rank ?? ($index + 1),
                         $nominee->name,
                         $nominee->department ?? 'N/A',
-                        $averageFormatted,
-                        $points,
-                        $ballots,
-                        $percentage.'%',
-                        $totalPoints,
+                        number_format((float) $nominee->dc_score, 2),
+                        number_format((float) $nominee->dc_weighted_score, 2),
+                        number_format((float) $nominee->sh_average, 2),
+                        number_format((float) $nominee->sh_weighted_score, 2),
+                        number_format((float) $nominee->final_score, 2),
+                        $nominee->sh_count,
                     ]);
                 }
 
@@ -191,9 +184,10 @@ class VotingResultController extends Controller
                         'No nominees listed',
                         '-',
                         '0.00',
-                        0,
-                        0,
-                        '0%',
+                        '0.00',
+                        '0.00',
+                        '0.00',
+                        '0.00',
                         0,
                     ]);
                 }

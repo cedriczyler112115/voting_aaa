@@ -2,11 +2,14 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use App\Models\VotingAuditLog;
 use App\Models\VotingAward;
+use App\Models\VotingCriterion;
 use App\Models\VotingEvent;
 use App\Models\VotingNominee;
 use App\Models\VotingVote;
+use App\Models\VotingVoteScore;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -119,6 +122,9 @@ class VotingController extends Controller
 
         $event = VotingEvent::query()
             ->with([
+                'criteria' => function ($cQuery) {
+                    $cQuery->orderBy('display_order')->orderBy('id');
+                },
                 'awards' => function ($query) {
                     $query->where('status', 'active')
                         ->orderBy('display_order')
@@ -133,24 +139,33 @@ class VotingController extends Controller
             ->where('slug', $slug)
             ->firstOrFail();
 
-        // Retrieve voter's existing votes for this event
+        // Retrieve voter's existing votes and criteria scores for this event
         $userVotes = [];
         if ($user) {
             $votes = VotingVote::query()
+                ->with('scores')
                 ->where('voter_id', $user->id)
                 ->where('voting_event_id', $event->id)
                 ->get();
 
             foreach ($votes as $vote) {
-                $userVotes[$vote->voting_award_id][$vote->voting_nominee_id] = $vote->rank;
+                $criteriaScores = [];
+                foreach ($vote->scores as $vs) {
+                    $criteriaScores[$vs->voting_criterion_id] = (float) $vs->score;
+                }
+                $userVotes[$vote->voting_award_id][$vote->voting_nominee_id] = [
+                    'score' => (float) $vote->score,
+                    'criteria_scores' => $criteriaScores,
+                ];
             }
         }
 
         $awards = $event->awards->map(function (VotingAward $award) use ($userVotes) {
             $awardUserVotes = $userVotes[$award->id] ?? [];
-            $hasVoted = ! empty($awardUserVotes);
             $activeNominees = $award->nominees->where('status', 'active');
             $nomineesCount = $activeNominees->count();
+            $scoredCount = count($awardUserVotes);
+            $hasVoted = $nomineesCount > 0 && $scoredCount >= $nomineesCount;
 
             return [
                 'id' => $award->id,
@@ -160,8 +175,10 @@ class VotingController extends Controller
                 'is_open' => $award->isOpen(),
                 'allows_vote_changes' => $award->allowsVoteChanges(),
                 'has_voted' => $hasVoted,
-                'max_rank' => $nomineesCount,
-                'user_rankings' => $awardUserVotes,
+                'nominees_count' => $nomineesCount,
+                'scored_nominees_count' => $scoredCount,
+                'unscored_nominees_count' => max(0, $nomineesCount - $scoredCount),
+                'user_scores' => $awardUserVotes,
                 'nominees' => $award->nominees->map(fn (VotingNominee $nominee) => [
                     'id' => $nominee->id,
                     'name' => $nominee->name,
@@ -170,13 +187,18 @@ class VotingController extends Controller
                     'department' => $nominee->department,
                     'organization' => $nominee->organization,
                     'status' => $nominee->status,
-                    'user_rank' => $awardUserVotes[$nominee->id] ?? null,
+                    'user_score' => $awardUserVotes[$nominee->id]['score'] ?? null,
+                    'user_criteria_scores' => $awardUserVotes[$nominee->id]['criteria_scores'] ?? (object) [],
                 ]),
             ];
         });
 
         $totalAwards = $awards->count();
-        $completedAwards = count($userVotes);
+        $completedAwards = $event->awards->filter(function ($award) use ($userVotes) {
+            $activeCount = $award->nominees->where('status', 'active')->count();
+            $scoredCount = count($userVotes[$award->id] ?? []);
+            return $activeCount > 0 && $scoredCount >= $activeCount;
+        })->count();
 
         // Retrieve all authorized/eligible voters for this event
         $authorizedEligibilities = $event->eligibilities()
@@ -226,6 +248,14 @@ class VotingController extends Controller
                 'progress_percentage' => $totalAwards > 0 ? round(($completedAwards / $totalAwards) * 100) : 0,
                 'total_authorized_voters' => $totalAuthorizedCount,
                 'staff_voted_count' => $staffVotedCount,
+                'criteria' => $event->criteria->map(fn (VotingCriterion $c) => [
+                    'id' => $c->id,
+                    'name' => $c->name,
+                    'description' => $c->description,
+                    'max_score' => (float) $c->max_score,
+                    'display_order' => $c->display_order,
+                ]),
+                'total_criteria_score' => (float) $event->criteria->sum('max_score'),
             ],
             'unvoted_voters' => $unvotedVoters,
             'awards' => $awards,
@@ -233,32 +263,174 @@ class VotingController extends Controller
     }
 
     /**
-     * Submit or change ranking votes for an award.
+     * Save an individual nominee's criteria score directly to the database.
+     */
+    public function saveNomineeScore(Request $request): RedirectResponse
+    {
+        $validated = $request->validate([
+            'voting_award_id' => ['required', 'integer', 'exists:voting_awards,id'],
+            'voting_nominee_id' => ['required', 'integer', 'exists:voting_nominees,id'],
+            'scores' => ['required', 'array'],
+        ]);
+
+        $user = $request->user();
+
+        $award = VotingAward::query()
+            ->with([
+                'event.criteria' => function ($q) {
+                    $q->orderBy('display_order')->orderBy('id');
+                },
+                'nominees' => function ($q) {
+                    $q->where('status', 'active');
+                },
+            ])
+            ->whereKey($validated['voting_award_id'])
+            ->firstOrFail();
+
+        $event = $award->event;
+        $criteria = $event->criteria;
+
+        $nominee = $award->nominees->firstWhere('id', $validated['voting_nominee_id']);
+        if (! $nominee) {
+            return back()->with('error', 'Selected nominee is invalid or does not belong to this award.');
+        }
+
+        if ($criteria->isEmpty()) {
+            return back()->with('error', 'No evaluation criteria configured for this event. Please contact the administrator.');
+        }
+
+        if (! $event->isUserEligible($user)) {
+            return back()->with('error', 'You are not on the list of authorized voters for this event.');
+        }
+
+        if (! $event->isOpen()) {
+            if ($event->isUpcoming()) {
+                return back()->with('error', 'Voting has not opened yet for this event.');
+            }
+
+            return back()->with('error', 'Voting is closed for this event.');
+        }
+
+        if (! $award->isOpen()) {
+            return back()->with('error', 'Voting for this award is currently unavailable or closed.');
+        }
+
+        $existingVote = VotingVote::query()
+            ->where('voter_id', $user->id)
+            ->where('voting_award_id', $award->id)
+            ->where('voting_nominee_id', $nominee->id)
+            ->first();
+
+        if ($existingVote && ! $award->allowsVoteChanges()) {
+            return back()->with('error', 'You have already submitted a score for this nominee, and changing scores is disabled.');
+        }
+
+        $rawScores = $validated['scores'];
+        $breakdown = [];
+        $nomineeTotal = 0.0;
+
+        foreach ($criteria as $criterion) {
+            if (! isset($rawScores[$criterion->id]) && ! isset($rawScores[(string) $criterion->id])) {
+                return back()->with('error', "Please provide a score for criterion '{$criterion->name}'.");
+            }
+
+            $cScore = (float) ($rawScores[$criterion->id] ?? $rawScores[(string) $criterion->id]);
+            if ($cScore < 0 || $cScore > (float) $criterion->max_score) {
+                return back()->with('error', "Score for '{$criterion->name}' must be between 0 and {$criterion->max_score}.");
+            }
+
+            $nomineeTotal += $cScore;
+            $breakdown[$criterion->id] = $cScore;
+        }
+
+        DB::transaction(function () use ($user, $event, $award, $nominee, $nomineeTotal, $breakdown, $request) {
+            $now = now();
+            $ip = $request->ip();
+            $userAgent = substr((string) $request->userAgent(), 0, 500);
+
+            $vote = VotingVote::updateOrCreate(
+                [
+                    'voter_id' => $user->id,
+                    'voting_award_id' => $award->id,
+                    'voting_nominee_id' => $nominee->id,
+                ],
+                [
+                    'voting_event_id' => $event->id,
+                    'score' => $nomineeTotal,
+                    'rank' => null,
+                    'voted_at' => $now,
+                    'ip_address' => $ip,
+                    'user_agent' => $userAgent,
+                ]
+            );
+
+            foreach ($breakdown as $criterionId => $cScore) {
+                VotingVoteScore::updateOrCreate(
+                    [
+                        'voting_vote_id' => $vote->id,
+                        'voting_criterion_id' => $criterionId,
+                    ],
+                    [
+                        'score' => $cScore,
+                    ]
+                );
+            }
+
+            VotingAuditLog::create([
+                'user_id' => $user->id,
+                'action' => 'vote.nominee_scored',
+                'description' => "Scored nominee {$nominee->name} in award {$award->name} with total {$nomineeTotal}%",
+                'metadata' => [
+                    'voting_event_id' => $event->id,
+                    'voting_award_id' => $award->id,
+                    'voting_nominee_id' => $nominee->id,
+                    'score' => $nomineeTotal,
+                    'breakdown' => $breakdown,
+                ],
+                'ip_address' => $ip,
+                'user_agent' => $userAgent,
+            ]);
+        });
+
+        return back()->with('success', "Score for {$nominee->name} successfully saved to the database!");
+    }
+
+    /**
+     * Submit or change criteria scoring votes for an award.
      */
     public function castVote(Request $request): RedirectResponse
     {
         $validated = $request->validate([
             'voting_award_id' => ['required', 'integer', 'exists:voting_awards,id'],
-            'rankings' => ['nullable'],
-            'voting_nominee_id' => ['nullable', 'integer'],
+            'scores' => ['required', 'array'],
         ]);
 
         $user = $request->user();
 
-        // 1. Fetch award and verify parent event and active nominees
+        // 1. Fetch award and verify parent event, criteria, and active nominees
         $award = VotingAward::query()
-            ->with(['event', 'nominees' => function ($q) {
-                $q->where('status', 'active');
-            }])
+            ->with([
+                'event.criteria' => function ($q) {
+                    $q->orderBy('display_order')->orderBy('id');
+                },
+                'nominees' => function ($q) {
+                    $q->where('status', 'active');
+                },
+            ])
             ->whereKey($validated['voting_award_id'])
             ->firstOrFail();
 
         $event = $award->event;
+        $criteria = $event->criteria;
         $activeNominees = $award->nominees;
         $nomineesCount = $activeNominees->count();
 
         if ($nomineesCount === 0) {
             return back()->with('error', 'No active nominees registered for this award.');
+        }
+
+        if ($criteria->isEmpty()) {
+            return back()->with('error', 'No evaluation criteria configured for this event. Please contact the administrator.');
         }
 
         // 2. Validate user eligibility
@@ -280,43 +452,57 @@ class VotingController extends Controller
             return back()->with('error', 'Voting for this award is currently unavailable or closed.');
         }
 
-        // 5. Normalize rankings input map: [nominee_id => rank]
-        $rankingsMap = [];
-        if ($request->has('rankings')) {
-            $raw = $request->input('rankings');
-            if (is_array($raw)) {
-                foreach ($raw as $key => $val) {
-                    if (is_array($val) && isset($val['nominee_id'], $val['rank'])) {
-                        $rankingsMap[(int) $val['nominee_id']] = (int) $val['rank'];
-                    } elseif (is_array($val) && isset($val['voting_nominee_id'], $val['rank'])) {
-                        $rankingsMap[(int) $val['voting_nominee_id']] = (int) $val['rank'];
-                    } elseif (is_numeric($key) && is_numeric($val)) {
-                        $rankingsMap[(int) $key] = (int) $val;
-                    }
+        // 5. Normalize scores input map: [nominee_id => [criterion_id => score]]
+        $scoresMap = [];
+        $rawScores = $request->input('scores');
+        if (is_array($rawScores)) {
+            foreach ($rawScores as $key => $val) {
+                if (is_array($val) && isset($val['nominee_id'], $val['criteria_scores']) && is_array($val['criteria_scores'])) {
+                    $scoresMap[(int) $val['nominee_id']] = $val['criteria_scores'];
+                } elseif (is_numeric($key) && is_array($val)) {
+                    $scoresMap[(int) $key] = $val;
                 }
             }
-        } elseif ($request->filled('voting_nominee_id')) {
-            $rankingsMap[(int) $request->input('voting_nominee_id')] = 1;
         }
 
-        // 6. Validate complete ranking: all nominees must be ranked with distinct ranks from 1 to N
-        if (count($rankingsMap) !== $nomineesCount) {
-            return back()->with('error', "Please assign a unique rank to all {$nomineesCount} nominees (from {$nomineesCount} down to 1).");
+        // 6. Validate that all active nominees have been scored
+        if (count($scoresMap) !== $nomineesCount) {
+            return back()->with('error', "Please provide criteria scores for all {$nomineesCount} nominees.");
         }
 
         $activeIds = $activeNominees->pluck('id')->all();
-        if (array_diff(array_keys($rankingsMap), $activeIds) || array_diff($activeIds, array_keys($rankingsMap))) {
+        if (array_diff(array_keys($scoresMap), $activeIds) || array_diff($activeIds, array_keys($scoresMap))) {
             return back()->with('error', 'Selected nominees are invalid or do not belong to this award.');
         }
 
-        $assignedRanks = array_values($rankingsMap);
-        sort($assignedRanks);
-        if ($assignedRanks !== range(1, $nomineesCount)) {
-            return back()->with('error', "Each nominee must have a unique rank from 1 to {$nomineesCount}. No duplicate ranks are allowed.");
+        // 7. Validate criteria scores per nominee
+        $validatedNomineeScores = [];
+        foreach ($scoresMap as $nomineeId => $nomineeCriteriaScores) {
+            $nomineeTotal = 0.0;
+            $breakdown = [];
+
+            foreach ($criteria as $criterion) {
+                if (! isset($nomineeCriteriaScores[$criterion->id]) && ! isset($nomineeCriteriaScores[(string) $criterion->id])) {
+                    return back()->with('error', "Please provide a score for criterion '{$criterion->name}' for all nominees.");
+                }
+
+                $cScore = (float) ($nomineeCriteriaScores[$criterion->id] ?? $nomineeCriteriaScores[(string) $criterion->id]);
+                if ($cScore < 0 || $cScore > (float) $criterion->max_score) {
+                    return back()->with('error', "Score for '{$criterion->name}' must be between 0 and {$criterion->max_score}.");
+                }
+
+                $nomineeTotal += $cScore;
+                $breakdown[$criterion->id] = $cScore;
+            }
+
+            $validatedNomineeScores[$nomineeId] = [
+                'total' => $nomineeTotal,
+                'breakdown' => $breakdown,
+            ];
         }
 
-        // 7. Process ranking votes inside DB transaction
-        return DB::transaction(function () use ($user, $event, $award, $rankingsMap, $request) {
+        // 8. Process scoring votes inside DB transaction
+        return DB::transaction(function () use ($user, $event, $award, $validatedNomineeScores, $request) {
             $existingVotesCount = VotingVote::query()
                 ->where('voter_id', $user->id)
                 ->where('voting_award_id', $award->id)
@@ -338,29 +524,38 @@ class VotingController extends Controller
             $ip = $request->ip();
             $userAgent = substr((string) $request->userAgent(), 0, 500);
 
-            foreach ($rankingsMap as $nomineeId => $rank) {
-                VotingVote::create([
+            foreach ($validatedNomineeScores as $nomineeId => $data) {
+                $vote = VotingVote::create([
                     'voter_id' => $user->id,
                     'voting_event_id' => $event->id,
                     'voting_award_id' => $award->id,
                     'voting_nominee_id' => $nomineeId,
-                    'rank' => $rank,
+                    'score' => $data['total'],
+                    'rank' => null,
                     'voted_at' => $now,
                     'ip_address' => $ip,
                     'user_agent' => $userAgent,
                 ]);
+
+                foreach ($data['breakdown'] as $criterionId => $cScore) {
+                    VotingVoteScore::create([
+                        'voting_vote_id' => $vote->id,
+                        'voting_criterion_id' => $criterionId,
+                        'score' => $cScore,
+                    ]);
+                }
             }
 
             VotingAuditLog::log(
                 action: $existingVotesCount > 0 ? 'vote.changed' : 'vote.cast',
-                description: "User [{$user->email}] cast ranking votes in award [{$award->name}]",
+                description: "User [{$user->email}] submitted criteria scores in award [{$award->name}]",
                 auditable: $award,
-                newValues: ['rankings' => $rankingsMap]
+                newValues: ['scores' => $validatedNomineeScores]
             );
 
             $msg = $existingVotesCount > 0
-                ? "Your rankings for {$award->name} have been successfully updated!"
-                : "Rankings successfully recorded for {$award->name}!";
+                ? "Your evaluation scores for {$award->name} have been successfully updated!"
+                : "Evaluation scores successfully recorded for {$award->name}!";
 
             return back()->with('success', $msg);
         });
@@ -414,7 +609,6 @@ class VotingController extends Controller
         }
 
         $votes = $query->orderByDesc('voted_at')
-            ->orderByDesc('rank')
             ->paginate(15)
             ->withQueryString()
             ->through(fn (VotingVote $vote) => [
@@ -425,8 +619,8 @@ class VotingController extends Controller
                 'nominee_name' => $vote->nominee ? $vote->nominee->name : 'N/A',
                 'nominee_department' => $vote->nominee ? $vote->nominee->department : null,
                 'nominee_organization' => $vote->nominee ? $vote->nominee->organization : null,
-                'rank' => $vote->rank,
-                'rank_label' => "Rank {$vote->rank}",
+                'score' => (float) $vote->score,
+                'score_formatted' => number_format((float) $vote->score, 2),
                 'voted_at' => $vote->voted_at->toDayDateTimeString(),
             ]);
 
@@ -476,29 +670,28 @@ class VotingController extends Controller
                     ];
                 }
 
-                $totalPoints = $award->nominees->sum(fn ($nominee) => $nominee->votes->sum('rank'));
+                $totalPoints = $award->nominees->sum(fn ($nominee) => $nominee->votes->sum('score'));
                 $distinctBallots = VotingVote::where('voting_award_id', $award->id)->distinct('voter_id')->count('voter_id');
 
-                // Sort nominees with tie-breaker rules (total points/average, highest-rank counts, display order/id)
                 $sortedNominees = $award->getSortedNominees()
-                    ->map(function (VotingNominee $nominee, int $index) use ($totalPoints, $distinctBallots) {
-                        $points = (int) $nominee->votes->sum('rank');
-                        $ballots = $nominee->votes->count();
-                        $percentage = $totalPoints > 0 ? round(($points / $totalPoints) * 100, 1) : 0;
-                        $averageScore = $distinctBallots > 0 ? round($points / $distinctBallots, 2) : 0.0;
-                        $averageFormatted = number_format($averageScore, 2, '.', '');
-
+                    ->map(function (VotingNominee $nominee, int $index) {
                         return [
                             'id' => $nominee->id,
                             'name' => $nominee->name,
                             'photo_path' => $nominee->photo_path,
                             'department' => $nominee->department,
-                            'votes_count' => $points,
-                            'total_points' => $points,
-                            'average_score' => $averageFormatted,
-                            'average_score_num' => $averageScore,
-                            'ballots_count' => $ballots,
-                            'percentage' => $percentage,
+                            'organization' => $nominee->organization,
+                            'status' => $nominee->status,
+                            'votes_count' => $nominee->ballots_count,
+                            'total_points' => $nominee->total_points,
+                            'final_score' => number_format((float) $nominee->final_score, 2),
+                            'final_score_num' => (float) $nominee->final_score,
+                            'dc_score' => number_format((float) $nominee->dc_score, 2),
+                            'dc_weighted_score' => number_format((float) $nominee->dc_weighted_score, 2),
+                            'dc_has_voted' => (bool) $nominee->dc_has_voted,
+                            'sh_count' => (int) $nominee->sh_count,
+                            'sh_average' => number_format((float) $nominee->sh_average, 2),
+                            'sh_weighted_score' => number_format((float) $nominee->sh_weighted_score, 2),
                             'rank' => $nominee->computed_rank ?? ($index + 1),
                             'is_tied' => (bool) ($nominee->is_tied ?? false),
                         ];
@@ -579,16 +772,11 @@ class VotingController extends Controller
                     ->get();
 
                 $awardsData = $awards->map(function (VotingAward $award) use ($canReveal, $isRevealDateReached) {
-                    $totalPoints = $award->nominees->sum(fn ($nominee) => $nominee->votes->sum('rank'));
+                    $totalPoints = $award->nominees->sum(fn ($nominee) => $nominee->votes->sum('score'));
                     $distinctBallots = VotingVote::where('voting_award_id', $award->id)->distinct('voter_id')->count('voter_id');
 
                     $sortedNominees = $award->getSortedNominees()
-                        ->map(function (VotingNominee $nominee, int $index) use ($totalPoints, $distinctBallots, $canReveal, $isRevealDateReached) {
-                            $points = (int) $nominee->votes->sum('rank');
-                            $ballots = $nominee->votes->count();
-                            $percentage = $totalPoints > 0 ? round(($points / $totalPoints) * 100, 1) : 0;
-                            $averageScore = $distinctBallots > 0 ? round($points / $distinctBallots, 2) : 0.0;
-                            $averageFormatted = number_format($averageScore, 2, '.', '');
+                        ->map(function (VotingNominee $nominee, int $index) use ($canReveal, $isRevealDateReached) {
                             $rank = $nominee->computed_rank ?? ($index + 1);
                             $isWinner = $rank === 1;
                             $shouldRevealNominee = $canReveal || $isRevealDateReached;
@@ -600,12 +788,16 @@ class VotingController extends Controller
                                 'department' => $shouldRevealNominee ? $nominee->department : null,
                                 'organization' => $shouldRevealNominee ? $nominee->organization : null,
                                 'status' => $nominee->status,
-                                'votes_count' => $points,
-                                'total_points' => $points,
-                                'average_score' => $averageFormatted,
-                                'average_score_num' => $averageScore,
-                                'ballots_count' => $ballots,
-                                'percentage' => $percentage,
+                                'votes_count' => $nominee->ballots_count,
+                                'total_points' => $nominee->total_points,
+                                'final_score' => number_format((float) $nominee->final_score, 2),
+                                'final_score_num' => (float) $nominee->final_score,
+                                'dc_score' => number_format((float) $nominee->dc_score, 2),
+                                'dc_weighted_score' => number_format((float) $nominee->dc_weighted_score, 2),
+                                'dc_has_voted' => (bool) $nominee->dc_has_voted,
+                                'sh_count' => (int) $nominee->sh_count,
+                                'sh_average' => number_format((float) $nominee->sh_average, 2),
+                                'sh_weighted_score' => number_format((float) $nominee->sh_weighted_score, 2),
                                 'rank' => $rank,
                                 'is_tied' => (bool) ($nominee->is_tied ?? false),
                                 'is_masked' => ! $shouldRevealNominee,
@@ -646,6 +838,172 @@ class VotingController extends Controller
                 'distinct_voters' => $distinctVoters,
             ] : null,
             'awards' => $awardsData,
+            'can_reveal' => $canReveal || $isRevealDateReached,
+            'is_reveal_date_reached' => $isRevealDateReached,
+        ]);
+    }
+
+    /**
+     * Detailed computation breakdown and voter scores matrix for a specific award category.
+     */
+    public function tabulationBreakdown(Request $request, VotingAward $award): Response
+    {
+        $user = $request->user();
+        $canReveal = $user && ($user->isAdmin() || (int) $user->id === 2);
+
+        $award->load([
+            'event.criteria' => fn ($q) => $q->orderBy('display_order')->orderBy('id'),
+            'nominees.votes.voter',
+            'nominees.votes.scores.criterion',
+            'votes.voter',
+            'votes.scores.criterion',
+        ]);
+
+        $event = $award->event;
+        $isRevealDateReached = $event->isRevealDateReached();
+        $shouldRevealNominee = $canReveal || $isRevealDateReached;
+
+        $criteria = $event->criteria;
+        $totalCriteriaScore = $criteria->sum('max_score') ?: 100;
+
+        // Get ranked nominees using the standard 50% DC + 50% SH formula
+        $sortedNominees = $award->getSortedNominees();
+
+        // Build list of nominees with their computed stats
+        $nomineesList = $sortedNominees->map(function (VotingNominee $nominee, int $index) use ($shouldRevealNominee) {
+            $rank = $nominee->computed_rank ?? ($index + 1);
+
+            return [
+                'id' => $nominee->id,
+                'name' => $shouldRevealNominee ? $nominee->name : ('Nominee #' . ($index + 1)),
+                'photo_path' => $shouldRevealNominee ? $nominee->photo_path : '/images/user_unknown.png',
+                'department' => $shouldRevealNominee ? $nominee->department : null,
+                'organization' => $shouldRevealNominee ? $nominee->organization : null,
+                'status' => $nominee->status,
+                'dc_score' => (float) $nominee->dc_score,
+                'dc_score_formatted' => number_format((float) $nominee->dc_score, 2),
+                'dc_weighted_score' => (float) $nominee->dc_weighted_score,
+                'dc_weighted_score_formatted' => number_format((float) $nominee->dc_weighted_score, 2),
+                'dc_has_voted' => (bool) $nominee->dc_has_voted,
+                'sh_count' => (int) $nominee->sh_count,
+                'sh_total' => (float) $nominee->sh_total,
+                'sh_total_formatted' => number_format((float) $nominee->sh_total, 2),
+                'sh_average' => (float) $nominee->sh_average,
+                'sh_average_formatted' => number_format((float) $nominee->sh_average, 2),
+                'sh_weighted_score' => (float) $nominee->sh_weighted_score,
+                'sh_weighted_score_formatted' => number_format((float) $nominee->sh_weighted_score, 2),
+                'final_score' => (float) $nominee->final_score,
+                'final_score_formatted' => number_format((float) $nominee->final_score, 2),
+                'rank' => $rank,
+                'is_winner' => $rank === 1,
+                'is_tied' => (bool) ($nominee->is_tied ?? false),
+                'is_masked' => ! $shouldRevealNominee,
+            ];
+        });
+
+        // 1. Division Chief (voter_id = 2) scores per nominee & criteria
+        $dcUser = User::find(2);
+        $dcNomineeScores = [];
+        foreach ($award->nominees as $nominee) {
+            $dcVote = $nominee->votes->firstWhere('voter_id', 2);
+            $criteriaMap = [];
+            if ($dcVote) {
+                foreach ($dcVote->scores as $scoreItem) {
+                    $criteriaMap[$scoreItem->voting_criterion_id] = (float) $scoreItem->score;
+                }
+            }
+            $dcNomineeScores[$nominee->id] = [
+                'has_voted' => $dcVote !== null,
+                'score' => $dcVote ? (float) $dcVote->score : null,
+                'weighted_score' => $dcVote ? round((float) $dcVote->score * 0.50, 2) : 0.0,
+                'criteria_scores' => $criteriaMap,
+            ];
+        }
+
+        // 2. Section Heads (voters with voter_id != 2)
+        $shVotesGroupedByVoter = $award->votes
+            ->where('voter_id', '!=', 2)
+            ->groupBy('voter_id');
+
+        $sectionHeadsList = [];
+        $shIndex = 1;
+
+        foreach ($shVotesGroupedByVoter as $voterId => $voterVotes) {
+            $firstVote = $voterVotes->first();
+            $voter = $firstVote?->voter ?? User::find($voterId);
+
+            $nomineeScores = [];
+            foreach ($award->nominees as $nominee) {
+                $nVote = $voterVotes->firstWhere('voting_nominee_id', $nominee->id);
+                $critScores = [];
+                if ($nVote) {
+                    foreach ($nVote->scores as $sc) {
+                        $critScores[$sc->voting_criterion_id] = (float) $sc->score;
+                    }
+                }
+                $nomineeScores[$nominee->id] = [
+                    'has_voted' => $nVote !== null,
+                    'score' => $nVote ? (float) $nVote->score : null,
+                    'criteria_scores' => $critScores,
+                ];
+            }
+
+            $sectionHeadsList[] = [
+                'voter_id' => $voterId,
+                'display_number' => $shIndex++,
+                'name' => $voter?->display_name ?? ('Voter #' . ($shIndex - 1)),
+                'email' => $voter?->email,
+                'department' => $voter?->department ?? $voter?->section ?? null,
+                'scores' => $nomineeScores,
+            ];
+        }
+
+        // Summary row for Section Heads matrix:
+        $shSummary = [];
+        foreach ($nomineesList as $nominee) {
+            $nId = $nominee['id'];
+            $shSummary[$nId] = [
+                'total_score' => $nominee['sh_total_formatted'],
+                'voters_count' => $nominee['sh_count'],
+                'average_score' => $nominee['sh_average_formatted'],
+                'weighted_score' => $nominee['sh_weighted_score_formatted'],
+            ];
+        }
+
+        return Inertia::render('voting/tabulation-breakdown', [
+            'event' => [
+                'id' => $event->id,
+                'title' => $event->title,
+                'slug' => $event->slug,
+                'status' => $event->computed_status,
+                'reveal_date' => $event->reveal_date?->format('Y-m-d'),
+                'is_closed' => $event->isClosed(),
+            ],
+            'award' => [
+                'id' => $award->id,
+                'name' => $award->name,
+                'description' => $award->description,
+                'status' => $award->status,
+                'nominees_count' => $award->nominees->count(),
+                'total_votes' => $award->nominees->sum(fn ($n) => $n->votes->sum('score')),
+            ],
+            'criteria' => $criteria->map(fn ($c) => [
+                'id' => $c->id,
+                'name' => $c->name,
+                'description' => $c->description,
+                'max_score' => (float) $c->max_score,
+                'display_order' => $c->display_order,
+            ]),
+            'total_criteria_score' => (float) $totalCriteriaScore,
+            'nominees' => $nomineesList,
+            'division_chief' => [
+                'id' => 2,
+                'name' => $dcUser ? $dcUser->display_name : 'Division Chief',
+                'department' => $dcUser?->department ?? 'Division Chief Office',
+                'scores' => $dcNomineeScores,
+            ],
+            'section_heads' => $sectionHeadsList,
+            'section_heads_summary' => $shSummary,
             'can_reveal' => $canReveal || $isRevealDateReached,
             'is_reveal_date_reached' => $isRevealDateReached,
         ]);

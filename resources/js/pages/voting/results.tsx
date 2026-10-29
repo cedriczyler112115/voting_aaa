@@ -16,10 +16,18 @@ type NomineeResult = {
     name: string;
     photo_path: string | null;
     department: string | null;
+    organization?: string | null;
     votes_count: number;
-    average_score?: string | number;
-    percentage: number;
+    final_score: string;
+    final_score_num: number;
+    dc_score: string;
+    dc_weighted_score: string;
+    dc_has_voted: boolean;
+    sh_count: number;
+    sh_average: string;
+    sh_weighted_score: string;
     rank: number;
+    is_tied?: boolean;
 };
 
 type AwardResult = {
@@ -28,6 +36,8 @@ type AwardResult = {
     description: string | null;
     is_hidden: boolean;
     total_votes: number;
+    total_points?: number;
+    distinct_ballots?: number;
     nominees: NomineeResult[];
 };
 
@@ -71,7 +81,7 @@ export default function VotingResults({ event, awards }: Props) {
                     <div className="flex items-center gap-2">
                         <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
                             <Trophy className="h-3.5 w-3.5" />
-                            Official Tally & Standings
+                            Official 50/50 Weighted Voting Matrix
                         </span>
                         <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
                             Status: {event.status}
@@ -83,7 +93,7 @@ export default function VotingResults({ event, awards }: Props) {
                     </h1>
                     <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
                         {event.description ||
-                            'Verified vote totals, nominee rankings, and statistical distribution for each award category.'}
+                            'Official final scores computed via criteria scoring: 50% Division Chief (DC) rating + 50% Section Heads average rating.'}
                     </p>
                 </div>
 
@@ -112,9 +122,9 @@ export default function VotingResults({ event, awards }: Props) {
                                 <div className="flex items-center gap-2 rounded-xl bg-muted/60 px-4 py-2 text-xs font-medium text-foreground">
                                     <Users className="h-4 w-4 text-primary" />
                                     <span>
-                                        Total Category Points:{' '}
+                                        Voters Participating:{' '}
                                         <strong className="font-bold">
-                                            {award.total_votes} pts
+                                            {award.distinct_ballots ?? award.total_votes}
                                         </strong>
                                     </span>
                                 </div>
@@ -138,7 +148,7 @@ export default function VotingResults({ event, awards }: Props) {
                                     {award.nominees.map((nominee) => {
                                         const isWinner =
                                             nominee.rank === 1 &&
-                                            nominee.votes_count > 0;
+                                            (nominee.final_score_num > 0 || nominee.votes_count > 0);
 
                                         return (
                                             <div
@@ -149,26 +159,22 @@ export default function VotingResults({ event, awards }: Props) {
                                                         : 'border-border/70 bg-card'
                                                 }`}
                                             >
-                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                                                     <div className="flex items-center gap-3.5">
                                                         {/* Rank badge */}
                                                         <div
-                                                            className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${
-                                                                nominee.rank ===
-                                                                1
+                                                            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${
+                                                                nominee.rank === 1
                                                                     ? 'bg-amber-500 text-white shadow-sm'
-                                                                    : nominee.rank ===
-                                                                        2
+                                                                    : nominee.rank === 2
                                                                       ? 'bg-neutral-300 text-foreground dark:bg-neutral-700'
-                                                                      : nominee.rank ===
-                                                                          3
+                                                                      : nominee.rank === 3
                                                                         ? 'bg-amber-700 text-white'
                                                                         : 'bg-muted text-muted-foreground'
                                                             }`}
                                                         >
-                                                            {nominee.rank ===
-                                                            1 ? (
-                                                                <Crown className="h-4 w-4" />
+                                                            {nominee.rank === 1 ? (
+                                                                <Crown className="h-5 w-5" />
                                                             ) : (
                                                                 `#${nominee.rank}`
                                                             )}
@@ -179,12 +185,8 @@ export default function VotingResults({ event, awards }: Props) {
                                                             <div className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted shadow-sm">
                                                                 {nominee.photo_path ? (
                                                                     <img
-                                                                        src={
-                                                                            nominee.photo_path
-                                                                        }
-                                                                        alt={
-                                                                            nominee.name
-                                                                        }
+                                                                        src={nominee.photo_path}
+                                                                        alt={nominee.name}
                                                                         className="h-full w-full object-cover"
                                                                     />
                                                                 ) : (
@@ -194,52 +196,82 @@ export default function VotingResults({ event, awards }: Props) {
                                                             <div>
                                                                 <div className="flex items-center gap-2">
                                                                     <h3 className="text-sm font-bold text-foreground md:text-base">
-                                                                        {
-                                                                            nominee.name
-                                                                        }
+                                                                        {nominee.name}
                                                                     </h3>
                                                                     {isWinner && (
                                                                         <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400">
-                                                                            <Sparkles className="h-3 w-3" />{' '}
-                                                                            Leading
+                                                                            <Sparkles className="h-3 w-3" /> Leading
                                                                         </span>
                                                                     )}
                                                                 </div>
                                                                 {nominee.department && (
                                                                     <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                                                         <Building2 className="h-3 w-3" />
-                                                                        <span>
-                                                                            {
-                                                                                nominee.department
-                                                                            }
-                                                                        </span>
+                                                                        <span>{nominee.department}</span>
                                                                     </div>
                                                                 )}
                                                             </div>
                                                         </div>
                                                     </div>
 
-                                                    {/* Votes & Percentage count */}
-                                                    <div className="flex items-center gap-4 sm:text-right">
-                                                        <div>
-                                                            <div className="text-base font-extrabold text-foreground">
-                                                                {
-                                                                    nominee.average_score ?? nominee.votes_count
-                                                                }{' '}
-                                                                avg
+                                                    {/* 50/50 Breakdown & Final Score */}
+                                                    <div className="flex flex-wrap items-center gap-4 sm:justify-end">
+                                                        {/* DC Component */}
+                                                        <div className="rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1.5 text-center text-xs">
+                                                            <div className="text-[10px] font-semibold text-muted-foreground">
+                                                                DC Score (50%)
                                                             </div>
-                                                            <div className="text-xs font-semibold text-muted-foreground">
-                                                                {
-                                                                    nominee.percentage
-                                                                }
-                                                                % of total
+                                                            <div className="font-bold text-foreground">
+                                                                {nominee.dc_has_voted ? (
+                                                                    <span>
+                                                                        {nominee.dc_score}%{' '}
+                                                                        <span className="text-[10px] text-primary">
+                                                                            ({nominee.dc_weighted_score}%)
+                                                                        </span>
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-muted-foreground italic">
+                                                                        Pending
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Section Heads Component */}
+                                                        <div className="rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1.5 text-center text-xs">
+                                                            <div className="text-[10px] font-semibold text-muted-foreground">
+                                                                SH Average (50%)
+                                                            </div>
+                                                            <div className="font-bold text-foreground">
+                                                                {nominee.sh_count > 0 ? (
+                                                                    <span>
+                                                                        {nominee.sh_average}%{' '}
+                                                                        <span className="text-[10px] text-primary">
+                                                                            ({nominee.sh_weighted_score}%)
+                                                                        </span>
+                                                                    </span>
+                                                                ) : (
+                                                                    <span className="text-muted-foreground italic">
+                                                                        0 votes
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Final Score */}
+                                                        <div className="text-right">
+                                                            <div className="font-mono text-xl font-black text-foreground">
+                                                                {nominee.final_score}%
+                                                            </div>
+                                                            <div className="text-[11px] font-medium text-muted-foreground">
+                                                                Final Weighted Score
                                                             </div>
                                                         </div>
                                                     </div>
                                                 </div>
 
                                                 {/* Percentage bar */}
-                                                <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
+                                                <div className="mt-3.5 h-2 w-full overflow-hidden rounded-full bg-muted">
                                                     <div
                                                         className={`h-full transition-all duration-700 ${
                                                             isWinner
@@ -247,7 +279,7 @@ export default function VotingResults({ event, awards }: Props) {
                                                                 : 'bg-primary'
                                                         }`}
                                                         style={{
-                                                            width: `${nominee.percentage}%`,
+                                                            width: `${Math.min(100, Math.max(0, nominee.final_score_num))}%`,
                                                         }}
                                                     />
                                                 </div>

@@ -1,5 +1,6 @@
 import { Head, Link, router, usePage } from '@inertiajs/react';
 import {
+    AlertCircle,
     ArrowLeft,
     Award,
     Briefcase,
@@ -13,10 +14,13 @@ import {
     Edit3,
     ExternalLink,
     MapPin,
+    Percent,
     Plus,
     Search,
     ShieldAlert,
     ShieldCheck,
+    Sliders,
+    Sparkles,
     Trash2,
     User,
     UserCheck,
@@ -75,6 +79,14 @@ type UserCandidate = {
     department?: string | null;
 };
 
+type CriterionItem = {
+    id: number;
+    name: string;
+    description: string | null;
+    max_score: number;
+    display_order: number;
+};
+
 type EventDetail = {
     id: number;
     title: string;
@@ -92,6 +104,8 @@ type EventDetail = {
     created_at: string;
     total_awards: number;
     total_votes: number;
+    total_criteria_score?: number;
+    criteria?: CriterionItem[];
     allowed_voters_count: number;
     allowed_voters: AllowedVoter[];
     awards: AwardItem[];
@@ -319,8 +333,55 @@ export default function EventShow({ event, all_users = [] }: Props) {
         router.delete(`/admin/nominees/${nominee.id}`);
     };
 
-    // Active Tab: 'awards' | 'voters'
-    const [activeTab, setActiveTab] = useState<'awards' | 'voters'>('awards');
+    // Active Tab: 'awards' | 'criteria' | 'voters'
+    const [activeTab, setActiveTab] = useState<'awards' | 'criteria' | 'voters'>('awards');
+
+    // Criteria Management State
+    const [isAddCriterionOpen, setIsAddCriterionOpen] = useState(false);
+    const [editingCriterion, setEditingCriterion] = useState<CriterionItem | null>(null);
+    const [criterionForm, setCriterionForm] = useState({
+        name: '',
+        description: '',
+        max_score: 20,
+        display_order: (event.criteria?.length || 0) + 1,
+    });
+
+    const handleAddCriterion = (e: FormEvent) => {
+        e.preventDefault();
+        setProcessing(true);
+        router.post(`/admin/events/${event.id}/criteria`, criterionForm, {
+            onSuccess: () => {
+                setIsAddCriterionOpen(false);
+                setCriterionForm({
+                    name: '',
+                    description: '',
+                    max_score: 20,
+                    display_order: (event.criteria?.length || 0) + 2,
+                });
+            },
+            onFinish: () => setProcessing(false),
+        });
+    };
+
+    const handleUpdateCriterion = (e: FormEvent) => {
+        e.preventDefault();
+        if (!editingCriterion) return;
+        setProcessing(true);
+        router.put(`/admin/criteria/${editingCriterion.id}`, criterionForm, {
+            onSuccess: () => setEditingCriterion(null),
+            onFinish: () => setProcessing(false),
+        });
+    };
+
+    const handleDeleteCriterion = (criterion: CriterionItem) => {
+        if (!confirm(`Are you sure you want to delete criterion "${criterion.name}"?`)) return;
+        router.delete(`/admin/criteria/${criterion.id}`);
+    };
+
+    const handleLoadDefaultCriteria = () => {
+        if (!confirm('Load the 5 standard ANINAG criteria totaling 100%?')) return;
+        router.post(`/admin/events/${event.id}/criteria/defaults`);
+    };
 
     // Voter List Management State
     const [isAddVotersOpen, setIsAddVotersOpen] = useState(false);
@@ -611,7 +672,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
                     </div>
                 </div>
 
-                {/* Tabs Switcher: Award Categories vs Authorized Voters */}
+                {/* Tabs Switcher: Award Categories vs Evaluation Criteria vs Authorized Voters */}
                 <div className="flex border-b border-border">
                     <button
                         type="button"
@@ -626,6 +687,27 @@ export default function EventShow({ event, all_users = [] }: Props) {
                         <span>Award Categories</span>
                         <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">
                             {event.awards.length}
+                        </span>
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setActiveTab('criteria')}
+                        className={`inline-flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
+                            activeTab === 'criteria'
+                                ? 'border-primary text-primary'
+                                : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'
+                        }`}
+                    >
+                        <Sliders className="h-4 w-4" />
+                        <span>Evaluation Criteria</span>
+                        <span
+                            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                                (event.total_criteria_score ?? 0) === 100
+                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                            }`}
+                        >
+                            {event.total_criteria_score ?? 0}% / 100%
                         </span>
                     </button>
                     <button
@@ -945,6 +1027,180 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                         </div>
                                     </div>
                                 ))}
+                            </div>
+                        )}
+                    </div>
+                ) : activeTab === 'criteria' ? (
+                    /* Dynamic Evaluation Criteria Manager */
+                    <div className="flex flex-col gap-6">
+                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div>
+                                <h2 className="text-xl font-bold tracking-tight text-foreground">
+                                    Evaluation Criteria ({event.criteria?.length || 0})
+                                </h2>
+                                <p className="mt-0.5 text-xs text-muted-foreground">
+                                    Define the weighted criteria used by voters to evaluate nominees. The total maximum score across all criteria must sum up to exactly 100%.
+                                </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                                {(!event.criteria || event.criteria.length === 0) && (
+                                    <button
+                                        type="button"
+                                        onClick={handleLoadDefaultCriteria}
+                                        className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3.5 py-2 text-xs font-semibold text-primary shadow-sm transition-colors hover:bg-primary/20"
+                                        title="Load 5 standard ANINAG criteria totaling 100%"
+                                    >
+                                        <Sparkles className="h-3.5 w-3.5" />
+                                        Load Sample ANINAG Criteria
+                                    </button>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setCriterionForm({
+                                            name: '',
+                                            description: '',
+                                            max_score: 20,
+                                            display_order: (event.criteria?.length || 0) + 1,
+                                        });
+                                        setIsAddCriterionOpen(true);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
+                                >
+                                    <Plus className="h-4 w-4" />
+                                    Add Criterion
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Weight Summary Banner */}
+                        <div
+                            className={`flex flex-col gap-3 rounded-2xl border p-5 sm:flex-row sm:items-center sm:justify-between ${
+                                (event.total_criteria_score ?? 0) === 100
+                                    ? 'border-emerald-500/30 bg-emerald-500/5'
+                                    : 'border-amber-500/30 bg-amber-500/5'
+                            }`}
+                        >
+                            <div className="flex items-start gap-3">
+                                {(event.total_criteria_score ?? 0) === 100 ? (
+                                    <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                                ) : (
+                                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                                )}
+                                <div>
+                                    <p className="text-sm font-bold text-foreground">
+                                        {(event.total_criteria_score ?? 0) === 100
+                                            ? 'Criteria Formulation Valid (100% Total Score)'
+                                            : `Criteria Total Score is ${event.total_criteria_score ?? 0}% (Must equal 100%)`}
+                                    </p>
+                                    <p className="mt-0.5 text-xs text-muted-foreground">
+                                        {(event.total_criteria_score ?? 0) === 100
+                                            ? 'Nominee ratings will be calculated based on this 100% matrix, with a 50% Section Heads average and 50% Division Chief weighted formula.'
+                                            : `Please adjust criteria maximum scores so that the combined total equals exactly 100% (currently ${event.total_criteria_score ?? 0}%).`}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-3">
+                                <div className="text-right">
+                                    <div className="text-xs font-medium text-muted-foreground">Total Max Weight</div>
+                                    <div
+                                        className={`text-2xl font-black ${
+                                            (event.total_criteria_score ?? 0) === 100
+                                                ? 'text-emerald-600 dark:text-emerald-400'
+                                                : 'text-amber-600 dark:text-amber-400'
+                                        }`}
+                                    >
+                                        {event.total_criteria_score ?? 0}%
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Criteria List */}
+                        {(!event.criteria || event.criteria.length === 0) ? (
+                            <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
+                                <Sliders className="mx-auto h-10 w-10 text-muted-foreground/60" />
+                                <h3 className="mt-3 text-base font-semibold text-foreground">
+                                    No Evaluation Criteria Defined
+                                </h3>
+                                <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+                                    Add dynamic criteria to build the 100% evaluation rubric for this voting event, or load standard criteria with one click.
+                                </p>
+                                <div className="mt-5 flex justify-center gap-3">
+                                    <button
+                                        type="button"
+                                        onClick={handleLoadDefaultCriteria}
+                                        className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
+                                    >
+                                        <Sparkles className="h-3.5 w-3.5" />
+                                        Load Sample ANINAG Criteria (100%)
+                                    </button>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+                                <div className="divide-y divide-border/60">
+                                    {event.criteria.map((criterion, idx) => (
+                                        <div
+                                            key={criterion.id}
+                                            className="flex flex-col gap-3 p-4 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between"
+                                        >
+                                            <div className="flex items-start gap-3">
+                                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-bold text-foreground">
+                                                    {criterion.display_order || idx + 1}
+                                                </div>
+                                                <div>
+                                                    <h4 className="text-sm font-bold text-foreground">
+                                                        {criterion.name}
+                                                    </h4>
+                                                    {criterion.description && (
+                                                        <p className="mt-0.5 text-xs text-muted-foreground">
+                                                            {criterion.description}
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center justify-between gap-4 sm:justify-end">
+                                                <div className="rounded-xl border border-border/80 bg-muted/50 px-3.5 py-1.5 text-center">
+                                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase">
+                                                        Max Score / Weight
+                                                    </span>
+                                                    <div className="text-sm font-black text-foreground">
+                                                        {criterion.max_score} pts ({criterion.max_score}%)
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex items-center gap-1">
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => {
+                                                            setEditingCriterion(criterion);
+                                                            setCriterionForm({
+                                                                name: criterion.name,
+                                                                description: criterion.description || '',
+                                                                max_score: criterion.max_score,
+                                                                display_order: criterion.display_order,
+                                                            });
+                                                        }}
+                                                        className="rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                        title="Edit criterion"
+                                                    >
+                                                        <Edit3 className="h-4 w-4" />
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteCriterion(criterion)}
+                                                        className="rounded-lg border border-red-500/20 bg-red-500/5 p-2 text-red-600 transition-colors hover:bg-red-500/10"
+                                                        title="Delete criterion"
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
                             </div>
                         )}
                     </div>
@@ -2132,6 +2388,132 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                     {processing
                                         ? 'Authorizing...'
                                         : `Authorize Selected (${selectedUserIds.length})`}
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            )}
+            {/* Add / Edit Criterion Modal */}
+            {(isAddCriterionOpen || editingCriterion) && (
+                <div className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-black/60 p-4 backdrop-blur-sm duration-200 fade-in">
+                    <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
+                        <div className="flex items-center justify-between border-b border-border/70 pb-4">
+                            <h2 className="text-lg font-bold text-foreground">
+                                {editingCriterion ? 'Edit Evaluation Criterion' : 'Add Evaluation Criterion'}
+                            </h2>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setIsAddCriterionOpen(false);
+                                    setEditingCriterion(null);
+                                }}
+                                className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <form
+                            onSubmit={editingCriterion ? handleUpdateCriterion : handleAddCriterion}
+                            className="mt-5 space-y-4"
+                        >
+                            <div>
+                                <label className="mb-1 block text-xs font-semibold text-foreground">
+                                    Criterion Name *
+                                </label>
+                                <input
+                                    type="text"
+                                    required
+                                    placeholder="e.g. Exemplary Work Performance"
+                                    value={criterionForm.name}
+                                    onChange={(e) =>
+                                        setCriterionForm({
+                                            ...criterionForm,
+                                            name: e.target.value,
+                                        })
+                                    }
+                                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-primary/20 focus:outline-none"
+                                />
+                            </div>
+
+                            <div>
+                                <label className="mb-1 block text-xs font-semibold text-foreground">
+                                    Description / Rubric
+                                </label>
+                                <textarea
+                                    rows={3}
+                                    placeholder="Describe how voters should evaluate this criterion..."
+                                    value={criterionForm.description}
+                                    onChange={(e) =>
+                                        setCriterionForm({
+                                            ...criterionForm,
+                                            description: e.target.value,
+                                        })
+                                    }
+                                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-primary/20 focus:outline-none"
+                                />
+                            </div>
+
+                            <div className="grid gap-4 sm:grid-cols-2">
+                                <div>
+                                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                                        Max Score / Weight (%) *
+                                    </label>
+                                    <input
+                                        type="number"
+                                        required
+                                        min={1}
+                                        max={100}
+                                        value={criterionForm.max_score}
+                                        onChange={(e) =>
+                                            setCriterionForm({
+                                                ...criterionForm,
+                                                max_score: parseFloat(e.target.value) || 0,
+                                            })
+                                        }
+                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-primary/20 focus:outline-none"
+                                    />
+                                    <p className="mt-1 text-[11px] text-muted-foreground">
+                                        Max score a voter can give.
+                                    </p>
+                                </div>
+                                <div>
+                                    <label className="mb-1 block text-xs font-semibold text-foreground">
+                                        Display Order
+                                    </label>
+                                    <input
+                                        type="number"
+                                        min={1}
+                                        value={criterionForm.display_order}
+                                        onChange={(e) =>
+                                            setCriterionForm({
+                                                ...criterionForm,
+                                                display_order: parseInt(e.target.value) || 1,
+                                            })
+                                        }
+                                        className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-primary/20 focus:outline-none"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="mt-6 flex items-center justify-end gap-3 border-t border-border/70 pt-4">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsAddCriterionOpen(false);
+                                        setEditingCriterion(null);
+                                    }}
+                                    className="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted"
+                                >
+                                    Cancel
+                                </button>
+                                <button
+                                    type="submit"
+                                    disabled={processing}
+                                    className="rounded-lg bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                                >
+                                    {processing ? 'Saving...' : editingCriterion ? 'Update Criterion' : 'Create Criterion'}
                                 </button>
                             </div>
                         </form>

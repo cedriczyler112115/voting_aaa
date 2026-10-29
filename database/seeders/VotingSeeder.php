@@ -186,5 +186,49 @@ class VotingSeeder extends Seeder
                 ]
             );
         }
+
+        // 4. Default criteria for the event (Matrix: 40%, 20%, 20%, 10%, 10% = 100%)
+        $criteriaData = [
+            [
+                'name' => 'Exemplary Work Performance',
+                'description' => 'Consistently produces high-quality work, exceeds targets, and demonstrates superior job knowledge and problem-solving skills.',
+                'percentage' => 40.00,
+                'display_order' => 1,
+            ],
+            [
+                'name' => 'Commendable and Unique Contributions',
+                'description' => 'Introduces innovative ideas, simplifies processes, or solves critical problems that create significant value.',
+                'percentage' => 20.00,
+                'display_order' => 2,
+            ],
+            [
+                'name' => 'Leadership and Staff Engagement',
+                'description' => 'Inspires, mentors, and collaborates effectively with colleagues, fostering teamwork and motivation.',
+                'percentage' => 20.00,
+                'display_order' => 3,
+            ],
+            [
+                'name' => 'Stakeholder Coordination and Partnership Building',
+                'description' => 'Builds and maintains positive, productive relationships with clients, partners, and other departments.',
+                'percentage' => 10.00,
+                'display_order' => 4,
+            ],
+            [
+                'name' => 'Commitment to Learning and Integrity in Public Service',
+                'description' => 'Shows dedication to continuous learning, ethical conduct, professionalism, and institutional values.',
+                'percentage' => 10.00,
+                'display_order' => 5,
+            ],
+        ];
+
+        foreach ($criteriaData as $crit) {
+            \App\Models\VotingCriteria::firstOrCreate(
+                [
+                    'voting_event_id' => $event->id,
+                    'name' => $crit['name'],
+                ],
+                $crit
+            );
+        }
     }
 }

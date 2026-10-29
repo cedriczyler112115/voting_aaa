@@ -1,5 +1,18 @@
 import { Head, router } from '@inertiajs/react';
-import { Building2, Crown, FileSpreadsheet, User, Users, Vote } from 'lucide-react';
+import {
+    Award,
+    Building2,
+    Calculator,
+    CheckCircle2,
+    Clock,
+    Crown,
+    FileSpreadsheet,
+    MapPin,
+    Trophy,
+    User,
+    Users,
+    Vote,
+} from 'lucide-react';
 import AppLayout from '@/layouts/app-layout';
 
 type NomineeResult = {
@@ -10,9 +23,17 @@ type NomineeResult = {
     organization: string | null;
     status: string;
     votes_count: number;
-    average_score?: string | number;
-    percentage: number;
+    total_points: number;
+    final_score: string;
+    final_score_num: number;
+    dc_score: string;
+    dc_weighted_score: string;
+    dc_has_voted: boolean;
+    sh_count: number;
+    sh_average: string;
+    sh_weighted_score: string;
     rank: number;
+    is_tied?: boolean;
 };
 
 type AwardResult = {
@@ -20,6 +41,7 @@ type AwardResult = {
     name: string;
     status: string;
     total_votes: number;
+    distinct_ballots?: number;
     nominees: NomineeResult[];
 };
 
@@ -193,7 +215,7 @@ export default function AdminResults({
                         </div>
 
                         {/* Category Results */}
-                        <div className="flex flex-col gap-8">
+                        <div className="flex flex-col gap-10">
                             {awards.length === 0 ? (
                                 <div className="rounded-2xl border border-dashed border-border p-12 text-center text-sm text-muted-foreground">
                                     No award categories found for this voting
@@ -203,149 +225,203 @@ export default function AdminResults({
                                 awards.map((award, index) => (
                                     <div
                                         key={award.id}
-                                        className="overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-sm"
+                                        className="overflow-hidden rounded-2xl border border-border bg-card p-6 shadow-sm md:p-8"
                                     >
-                                        <div className="flex items-center justify-between border-b border-border/50 pb-4">
+                                        <div className="flex flex-col gap-2 border-b border-border/50 pb-5 md:flex-row md:items-center md:justify-between">
                                             <div>
-                                                <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                                                <div className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
                                                     Category {index + 1}
-                                                </span>
-                                                <h3 className="mt-0.5 text-xl font-bold text-foreground">
+                                                </div>
+                                                <h3 className="mt-0.5 text-xl font-bold tracking-tight text-foreground md:text-2xl">
                                                     {award.name}
                                                 </h3>
                                             </div>
 
-                                            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3.5 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
-                                                <Vote className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
-                                                <span>
-                                                    {award.total_votes} Category
-                                                    Points
-                                                </span>
+                                            <div className="flex flex-wrap items-center gap-3">
+                                                <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3.5 py-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                                                    <Users className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                                                    <span>
+                                                        {award.distinct_ballots ?? award.total_votes} Participating Voters
+                                                    </span>
+                                                </div>
                                             </div>
                                         </div>
 
-                                        <div className="mt-6 flex flex-col gap-3">
-                                            {award.nominees.length === 0 ? (
-                                                <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
-                                                    No nominees registered in
-                                                    this award category.
-                                                </div>
-                                            ) : (
-                                                award.nominees.map(
-                                                    (nominee) => {
-                                                        const isLeader =
-                                                            nominee.rank ===
-                                                                1 &&
-                                                            nominee.votes_count >
-                                                                0;
+                                        {award.nominees.length === 0 ? (
+                                            <div className="mt-6 rounded-xl border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
+                                                No nominees registered in this award category.
+                                            </div>
+                                        ) : (
+                                            <div className="mt-6 flex flex-col gap-8">
+                                                {/* Matrix Table (Table 3 from ANINAG 2026 Sample Voting Matrix) */}
+                                                <div>
+                                                    <div className="mb-3 flex items-center justify-between">
+                                                        <div className="flex items-center gap-2">
+                                                            <Award className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                                                            <h4 className="text-sm font-bold text-foreground">
+                                                                3. Tabulation Matrix (50% DC + 50% Section Heads)
+                                                            </h4>
+                                                        </div>
+                                                        <span className="text-xs text-muted-foreground italic">
+                                                            DC User ID: 2 (Crislea Dalauta Celeste)
+                                                        </span>
+                                                    </div>
 
-                                                        return (
-                                                            <div
-                                                                key={nominee.id}
-                                                                className={`relative rounded-xl border p-4 transition-all ${
-                                                                    isLeader
-                                                                        ? 'border-emerald-500/40 bg-emerald-500/[0.04] ring-1 ring-emerald-500/20'
-                                                                        : 'border-border/70 bg-card'
-                                                                }`}
-                                                            >
-                                                                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                                                    <div className="flex items-center gap-3">
-                                                                        <div
-                                                                            className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-xs font-bold ${
-                                                                                isLeader
-                                                                                    ? 'bg-emerald-600 text-white shadow-xs'
-                                                                                    : 'bg-muted text-muted-foreground'
+                                                    <div className="overflow-x-auto rounded-xl border border-border shadow-xs">
+                                                        <table className="w-full text-left text-xs">
+                                                            <thead className="border-b border-border bg-emerald-600 text-white font-semibold uppercase">
+                                                                <tr>
+                                                                    <th className="px-4 py-3">Nominee</th>
+                                                                    <th className="px-4 py-3 text-center">DC Score</th>
+                                                                    <th className="px-4 py-3 text-center">DC Weighted Score (50%)</th>
+                                                                    <th className="px-4 py-3 text-center">Section Heads' Average</th>
+                                                                    <th className="px-4 py-3 text-center">SH Weighted Score (50%)</th>
+                                                                    <th className="px-4 py-3 text-right">Final Score</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody className="divide-y divide-border/60 bg-card">
+                                                                {award.nominees.map((nominee) => {
+                                                                    const isWinner = nominee.rank === 1 && nominee.final_score_num > 0;
+                                                                    return (
+                                                                        <tr
+                                                                            key={nominee.id}
+                                                                            className={`transition-colors hover:bg-muted/20 ${
+                                                                                isWinner ? 'bg-emerald-500/[0.04]' : ''
                                                                             }`}
                                                                         >
-                                                                            {isLeader ? (
-                                                                                <Crown className="h-4 w-4" />
-                                                                            ) : (
-                                                                                `#${nominee.rank}`
-                                                                            )}
-                                                                        </div>
-
-                                                                        <div className="flex items-center gap-3">
-                                                                            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted text-muted-foreground shadow-sm">
-                                                                                {nominee.photo_path ? (
-                                                                                    <img
-                                                                                        src={
-                                                                                            nominee.photo_path
-                                                                                        }
-                                                                                        alt={
-                                                                                            nominee.name
-                                                                                        }
-                                                                                        className="h-full w-full object-cover"
-                                                                                    />
-                                                                                ) : (
-                                                                                    <User className="h-7 w-7 text-muted-foreground/50" />
-                                                                                )}
-                                                                            </div>
-                                                                            <div>
-                                                                                <div className={`text-sm font-bold ${isLeader ? 'text-emerald-950 dark:text-emerald-200' : 'text-foreground'}`}>
-                                                                                    {
-                                                                                        nominee.name
-                                                                                    }
+                                                                            <td className="px-4 py-3 font-semibold text-foreground">
+                                                                                <div className="flex items-center gap-3">
+                                                                                    <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-border bg-muted">
+                                                                                        {nominee.photo_path ? (
+                                                                                            <img
+                                                                                                src={nominee.photo_path}
+                                                                                                alt={nominee.name}
+                                                                                                className="h-full w-full object-cover"
+                                                                                            />
+                                                                                        ) : (
+                                                                                            <User className="h-4 w-4 text-muted-foreground/60" />
+                                                                                        )}
+                                                                                    </div>
+                                                                                    <div>
+                                                                                        <div className="flex items-center gap-1.5 font-bold">
+                                                                                            <span>{nominee.name}</span>
+                                                                                            {isWinner && (
+                                                                                                <Crown className="h-3.5 w-3.5 text-amber-500" />
+                                                                                            )}
+                                                                                        </div>
+                                                                                        {nominee.department && (
+                                                                                            <div className="text-[11px] font-normal text-muted-foreground">
+                                                                                                {nominee.department}
+                                                                                            </div>
+                                                                                        )}
+                                                                                    </div>
                                                                                 </div>
-                                                                                {nominee.department && (
-                                                                                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                                                                                        <Building2 className="h-3 w-3" />
-                                                                                        <span>
-                                                                                            {
-                                                                                                nominee.department
-                                                                                            }
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-center font-mono font-medium text-foreground">
+                                                                                {nominee.dc_has_voted ? (
+                                                                                    `${nominee.dc_score}%`
+                                                                                ) : (
+                                                                                    <span className="text-muted-foreground italic">Pending</span>
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-center font-mono font-bold text-primary">
+                                                                                {nominee.dc_has_voted ? (
+                                                                                    `${nominee.dc_weighted_score}%`
+                                                                                ) : (
+                                                                                    <span className="text-muted-foreground italic">0.00%</span>
+                                                                                )}
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-center font-mono font-medium text-foreground">
+                                                                                {nominee.sh_count > 0 ? (
+                                                                                    <div>
+                                                                                        <span>{nominee.sh_average}%</span>
+                                                                                        <span className="block text-[10px] text-muted-foreground">
+                                                                                            ({nominee.sh_count} voter{nominee.sh_count !== 1 ? 's' : ''})
                                                                                         </span>
                                                                                     </div>
+                                                                                ) : (
+                                                                                    <span className="text-muted-foreground italic">0 votes</span>
                                                                                 )}
-                                                                                {nominee.organization && (
-                                                                                    <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                                                                                        <Users className="h-3 w-3" />
-                                                                                        <span>
-                                                                                            {
-                                                                                                nominee.organization
-                                                                                            }
-                                                                                        </span>
-                                                                                    </div>
-                                                                                )}
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-center font-mono font-bold text-primary">
+                                                                                {nominee.sh_weighted_score}%
+                                                                            </td>
+                                                                            <td className="px-4 py-3 text-right">
+                                                                                <span className="font-mono text-sm font-black text-emerald-600 dark:text-emerald-400">
+                                                                                    {nominee.final_score}%
+                                                                                </span>
+                                                                            </td>
+                                                                        </tr>
+                                                                    );
+                                                                })}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
 
-                                                                    <div className="flex items-center gap-4 text-right">
-                                                                        <div>
-                                                                            <div className={`text-base font-extrabold ${isLeader ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground'}`}>
-                                                                                {
-                                                                                    nominee.average_score ?? nominee.votes_count
-                                                                                }{' '}
-                                                                                avg
-                                                                            </div>
-                                                                            <div className={`text-xs font-semibold ${isLeader ? 'text-emerald-600 dark:text-emerald-400' : 'text-muted-foreground'}`}>
-                                                                                {
-                                                                                    nominee.percentage
-                                                                                }
-                                                                                %
-                                                                            </div>
-                                                                        </div>
-                                                                    </div>
-                                                                </div>
+                                                    <div className="mt-2 text-[11px] text-muted-foreground">
+                                                        <strong>Formula:</strong> Final Score = (DC Score × 0.50) + (Average Section Heads' Score × 0.50)
+                                                    </div>
+                                                </div>
 
-                                                                <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-muted">
-                                                                    <div
-                                                                        className={`h-full transition-all duration-700 ${
-                                                                            isLeader
-                                                                                ? 'bg-gradient-to-r from-emerald-600 to-emerald-500'
-                                                                                : 'bg-emerald-600/50 dark:bg-emerald-500/40'
+                                                {/* Final Ranking Table (Table 4 from ANINAG 2026 Sample Voting Matrix) */}
+                                                <div>
+                                                    <div className="mb-3 flex items-center gap-2">
+                                                        <Trophy className="h-4 w-4 text-amber-500" />
+                                                        <h4 className="text-sm font-bold text-foreground">
+                                                            4. Final Ranking
+                                                        </h4>
+                                                    </div>
+
+                                                    <div className="max-w-xl overflow-x-auto rounded-xl border border-border shadow-xs">
+                                                        <table className="w-full text-left text-xs">
+                                                            <thead className="border-b border-border bg-emerald-700 text-white font-semibold uppercase">
+                                                                <tr>
+                                                                    <th className="w-20 px-4 py-2.5 text-center">Rank</th>
+                                                                    <th className="px-4 py-2.5">Nominee</th>
+                                                                    <th className="px-4 py-2.5 text-right">Final Weighted Score</th>
+                                                                </tr>
+                                                            </thead>
+                                                            <tbody className="divide-y divide-border/60 bg-card">
+                                                                {award.nominees.map((nominee) => (
+                                                                    <tr
+                                                                        key={nominee.id}
+                                                                        className={`transition-colors hover:bg-muted/20 ${
+                                                                            nominee.rank === 1 ? 'bg-amber-500/[0.05] font-semibold' : ''
                                                                         }`}
-                                                                        style={{
-                                                                            width: `${nominee.percentage}%`,
-                                                                        }}
-                                                                    />
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    },
-                                                )
-                                            )}
-                                        </div>
+                                                                    >
+                                                                        <td className="px-4 py-2.5 text-center">
+                                                                            <span
+                                                                                className={`inline-flex h-6 w-6 items-center justify-center rounded-md text-xs font-bold ${
+                                                                                    nominee.rank === 1
+                                                                                        ? 'bg-amber-500 text-white'
+                                                                                        : nominee.rank === 2
+                                                                                          ? 'bg-neutral-300 text-foreground dark:bg-neutral-700'
+                                                                                          : nominee.rank === 3
+                                                                                            ? 'bg-amber-700 text-white'
+                                                                                            : 'bg-muted text-muted-foreground'
+                                                                                }`}
+                                                                            >
+                                                                                {nominee.rank === 1 ? (
+                                                                                    <Crown className="h-3.5 w-3.5" />
+                                                                                ) : (
+                                                                                    nominee.rank
+                                                                                )}
+                                                                            </span>
+                                                                        </td>
+                                                                        <td className="px-4 py-2.5 text-foreground">
+                                                                            {nominee.name}
+                                                                        </td>
+                                                                        <td className="px-4 py-2.5 text-right font-mono font-bold text-emerald-600 dark:text-emerald-400">
+                                                                            {nominee.final_score}%
+                                                                        </td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 ))
                             )}

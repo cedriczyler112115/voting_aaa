@@ -7,18 +7,28 @@ import {
     Check,
     CheckCircle2,
     Crown,
+    LoaderCircle,
     Lock,
-    RotateCcw,
     Search,
     ShieldAlert,
+    Sliders,
     Sparkles,
     Trophy,
     User,
     Users,
     Vote,
+    X,
 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import AppLayout from '@/layouts/app-layout';
+
+type CriterionItem = {
+    id: number;
+    name: string;
+    description: string | null;
+    max_score: number;
+    display_order: number;
+};
 
 type NomineeItem = {
     id: number;
@@ -28,7 +38,8 @@ type NomineeItem = {
     department: string | null;
     organization: string | null;
     status: string;
-    user_rank: number | null;
+    user_score?: number | null;
+    user_criteria_scores?: Record<number, number>;
 };
 
 type AwardItem = {
@@ -39,8 +50,11 @@ type AwardItem = {
     is_open: boolean;
     allows_vote_changes: boolean;
     has_voted: boolean;
-    max_rank: number;
-    user_rankings: Record<number, number>;
+    nominees_count: number;
+    user_scores?: Record<
+        number,
+        { score: number; criteria_scores: Record<number, number> }
+    >;
     nominees: NomineeItem[];
 };
 
@@ -63,6 +77,8 @@ type EventDetail = {
     progress_percentage: number;
     total_authorized_voters?: number;
     staff_voted_count?: number;
+    criteria?: CriterionItem[];
+    total_criteria_score?: number;
 };
 
 type UnvotedVoter = {
@@ -102,19 +118,49 @@ export default function VotingShow({
         flash?: { success?: string; error?: string };
     }>().props;
 
-    // Track rankings per award: awardId -> { nomineeId: rank }
-    const [awardRankings, setAwardRankings] = useState<
-        Record<number, Record<number, number>>
+    // Track criteria scores: awardId -> nomineeId -> criterionId -> score
+    const [awardScores, setAwardScores] = useState<
+        Record<number, Record<number, Record<number, number>>>
     >(() => {
-        const initial: Record<number, Record<number, number>> = {};
+        const initial: Record<
+            number,
+            Record<number, Record<number, number>>
+        > = {};
         awards.forEach((award) => {
-            initial[award.id] = { ...award.user_rankings };
+            initial[award.id] = {};
+            award.nominees.forEach((nominee) => {
+                const existing = nominee.user_criteria_scores || {};
+                initial[award.id][nominee.id] = { ...existing };
+            });
         });
         return initial;
     });
 
-    const [modalAward, setModalAward] = useState<AwardItem | null>(null);
-    const [submitting, setSubmitting] = useState(false);
+    // Synchronize awardScores when props reload from database
+    useEffect(() => {
+        const initial: Record<
+            number,
+            Record<number, Record<number, number>>
+        > = {};
+        awards.forEach((award) => {
+            initial[award.id] = {};
+            award.nominees.forEach((nominee) => {
+                const existing = nominee.user_criteria_scores || {};
+                initial[award.id][nominee.id] = { ...existing };
+            });
+        });
+        setAwardScores(initial);
+    }, [awards]);
+
+    // State for individual nominee criteria scoring modal
+    const [scoringModal, setScoringModal] = useState<{
+        award: AwardItem;
+        nominee: NomineeItem;
+    } | null>(null);
+    const [modalCriterionScores, setModalCriterionScores] = useState<
+        Record<number, string>
+    >({});
+    const [savingNominee, setSavingNominee] = useState(false);
 
     const filteredUnvotedVoters = useMemo(() => {
         const query = voterSearch.trim().toLowerCase();
@@ -127,90 +173,137 @@ export default function VotingShow({
         );
     }, [unvoted_voters, voterSearch]);
 
-    // Generate rank choices from maxRank down to 1 (e.g. 5, 4, 3, 2, 1)
-    const getRankOptions = (maxRank: number) => {
-        const options: number[] = [];
-        for (let r = maxRank; r >= 1; r--) {
-            options.push(r);
-        }
-        return options;
-    };
+    const criteriaList = event.criteria || [];
+    const totalMaxScore = event.total_criteria_score || 100;
 
-    // Assign rank with auto-swap conflict resolution
-    const handleSetRank = (
-        award: AwardItem,
-        nomineeId: number,
-        targetRank: number | null,
-    ) => {
-        if (!event.is_open || !award.is_open) return;
-        if (award.has_voted && !award.allows_vote_changes) return;
-
-        setAwardRankings((prev) => {
-            const currentAwardRanks = { ...prev[award.id] };
-
-            if (targetRank === null) {
-                delete currentAwardRanks[nomineeId];
-                return { ...prev, [award.id]: currentAwardRanks };
-            }
-
-            // Find if another nominee in this award already holds this target rank
-            const otherNomineeEntry = Object.entries(currentAwardRanks).find(
-                ([id, rank]) => Number(id) !== nomineeId && rank === targetRank,
-            );
-
-            const oldRankOfCurrent = currentAwardRanks[nomineeId];
-
-            // Assign target rank to current nominee
-            currentAwardRanks[nomineeId] = targetRank;
-
-            // Auto-swap: give the previous occupant the current nominee's old rank, or unrank if none
-            if (otherNomineeEntry) {
-                const otherNomineeId = Number(otherNomineeEntry[0]);
-                if (oldRankOfCurrent) {
-                    currentAwardRanks[otherNomineeId] = oldRankOfCurrent;
-                } else {
-                    delete currentAwardRanks[otherNomineeId];
-                }
-            }
-
-            return { ...prev, [award.id]: currentAwardRanks };
+    // Open criteria scoring modal for a specific nominee
+    const handleOpenScoringModal = (award: AwardItem, nominee: NomineeItem) => {
+        const existing = awardScores[award.id]?.[nominee.id] || {};
+        const initial: Record<number, string> = {};
+        criteriaList.forEach((c) => {
+            initial[c.id] =
+                existing[c.id] !== undefined && existing[c.id] !== null
+                    ? String(existing[c.id])
+                    : '';
         });
+        setModalCriterionScores(initial);
+        setScoringModal({ award, nominee });
     };
 
-    const handleClearAwardRankings = (award: AwardItem) => {
-        if (!event.is_open || !award.is_open) return;
-        if (award.has_voted && !award.allows_vote_changes) return;
+    // Save scores from the modal directly to database
+    const handleSaveModalScores = () => {
+        if (!scoringModal || savingNominee) return;
+        const { award, nominee } = scoringModal;
+        const cleaned: Record<number, number> = {};
 
-        setAwardRankings((prev) => ({
-            ...prev,
-            [award.id]: {},
-        }));
-    };
+        criteriaList.forEach((c) => {
+            const raw = modalCriterionScores[c.id];
+            let val = parseFloat(raw || '0');
+            if (isNaN(val) || val < 0) val = 0;
+            if (val > c.max_score) val = c.max_score;
+            cleaned[c.id] = val;
+        });
 
-    const handleOpenConfirm = (award: AwardItem) => {
-        setModalAward(award);
-    };
-
-    const handleConfirmVote = () => {
-        if (!modalAward) return;
-
-        const rankings = awardRankings[modalAward.id] ?? {};
-        setSubmitting(true);
-
+        setSavingNominee(true);
         router.post(
-            '/voting/vote',
+            '/voting/save-nominee-score',
             {
-                voting_award_id: modalAward.id,
-                rankings: rankings,
+                voting_award_id: award.id,
+                voting_nominee_id: nominee.id,
+                scores: cleaned,
             },
             {
                 preserveScroll: true,
+                onSuccess: () => {
+                    setAwardScores((prev) => ({
+                        ...prev,
+                        [award.id]: {
+                            ...prev[award.id],
+                            [nominee.id]: cleaned,
+                        },
+                    }));
+                    setScoringModal(null);
+                },
                 onFinish: () => {
-                    setSubmitting(false);
-                    setModalAward(null);
+                    setSavingNominee(false);
                 },
             },
         );
+    };
+
+    // Calculate total score for a nominee in an award
+    const getNomineeTotal = (awardId: number, nomineeId: number): number => {
+        const nomineeCriteria = awardScores[awardId]?.[nomineeId] || {};
+        return Object.values(nomineeCriteria).reduce(
+            (sum, val) => sum + (Number(val) || 0),
+            0,
+        );
+    };
+
+    // Check if nominee has scores recorded for all criteria
+    const isNomineeComplete = (
+        awardId: number,
+        nomineeId: number,
+    ): boolean => {
+        if (criteriaList.length === 0) return false;
+        const nomineeCriteria = awardScores[awardId]?.[nomineeId];
+        if (!nomineeCriteria || Object.keys(nomineeCriteria).length === 0) return false;
+        return criteriaList.every(
+            (c) =>
+                nomineeCriteria[c.id] !== undefined &&
+                nomineeCriteria[c.id] !== null &&
+                !isNaN(nomineeCriteria[c.id]),
+        );
+    };
+
+    // Group unscored nominees by award for warning notification badges
+    const unscoredNomineesByAward = useMemo(() => {
+        const map: Record<number, NomineeItem[]> = {};
+        awards.forEach((award) => {
+            const active = award.nominees.filter((n) => n.status === 'active');
+            map[award.id] = active.filter((n) => !isNomineeComplete(award.id, n.id));
+        });
+        return map;
+    }, [awards, awardScores, criteriaList]);
+
+    // Total count of unscored nominees across all active awards
+    const totalUnscoredCount = useMemo(() => {
+        return Object.values(unscoredNomineesByAward).reduce(
+            (sum, list) => sum + list.length,
+            0,
+        );
+    }, [unscoredNomineesByAward]);
+
+    const totalActiveNomineesCount = useMemo(() => {
+        return awards.reduce(
+            (sum, a) => sum + a.nominees.filter((n) => n.status === 'active').length,
+            0,
+        );
+    }, [awards]);
+
+    // Check if an award category is completely scored
+    const isAwardComplete = (award: AwardItem): boolean => {
+        const activeNominees = award.nominees.filter((n) => n.status === 'active');
+        if (activeNominees.length === 0 || criteriaList.length === 0) return false;
+        return activeNominees.every((nominee) =>
+            isNomineeComplete(award.id, nominee.id),
+        );
+    };
+
+    // Check if voter changed any scores from previously saved ones
+    const hasAwardChanges = (award: AwardItem): boolean => {
+        if (!award.has_voted) return true;
+        const currentAward = awardScores[award.id] || {};
+        for (const nominee of award.nominees) {
+            const currentNominee = currentAward[nominee.id] || {};
+            const initialNominee = nominee.user_criteria_scores || {};
+            for (const criterion of criteriaList) {
+                const cVal = currentNominee[criterion.id] ?? 0;
+                const iVal = initialNominee[criterion.id] ?? 0;
+                if (cVal !== iVal) return true;
+            }
+        }
+        return false;
     };
 
     const breadcrumbs = [
@@ -238,145 +331,112 @@ export default function VotingShow({
                 <div className="rounded-2xl border border-border/70 bg-card p-6 shadow-sm md:p-8 dark:border-neutral-800">
                     <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
                         <div>
-                            <div className="flex items-center gap-2">
-                                {event.is_open ? (
-                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                                        <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
-                                        Voting Open
-                                    </span>
-                                ) : (
-                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-neutral-500/10 px-2.5 py-0.5 text-xs font-semibold text-neutral-600 dark:text-neutral-400">
-                                        <Lock className="h-3 w-3" />
-                                        {event.status}
+                            <div className="flex flex-wrap items-center gap-2">
+                                <span
+                                    className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-semibold ${
+                                        event.is_open
+                                            ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                                            : event.is_closed
+                                              ? 'bg-red-500/10 text-red-600 dark:text-red-400'
+                                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
+                                    }`}
+                                >
+                                    <span
+                                        className={`h-2 w-2 rounded-full ${
+                                            event.is_open
+                                                ? 'bg-emerald-500'
+                                                : event.is_closed
+                                                  ? 'bg-red-500'
+                                                  : 'bg-amber-500'
+                                        }`}
+                                    />
+                                    {event.status.toUpperCase()}
+                                </span>
+
+                                <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-xs font-semibold text-primary">
+                                    <Sliders className="h-3.5 w-3.5" />
+                                    Criteria Scoring Matrix (100%)
+                                </span>
+
+                                {event.allow_vote_changes && (
+                                    <span className="text-xs text-muted-foreground">
+                                        • Vote changes permitted before closing
                                     </span>
                                 )}
-                                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-semibold text-primary">
-                                    <Trophy className="h-3 w-3" />
-                                    Ranking Style Voting
-                                </span>
                             </div>
 
                             <h1 className="mt-2 text-2xl font-bold tracking-tight text-foreground md:text-3xl">
                                 {event.title}
                             </h1>
-                            {event.description && (
-                                <p className="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
-                                    {event.description}
-                                </p>
-                            )}
+                            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+                                {event.description ||
+                                    'Score nominees across the evaluation criteria. Final scores are weighted 50% from the Division Chief and 50% from Section Heads.'}
+                            </p>
                         </div>
 
-                        {/* Progress card */}
-                        <div className="flex min-w-[200px] shrink-0 flex-col rounded-xl border border-border/60 bg-muted/40 p-4">
-                            <div className="flex items-center justify-between text-xs font-medium text-muted-foreground">
-                                <span>Ballot Progress</span>
-                                <span className="font-bold text-foreground">
-                                    {event.completed_awards} /{' '}
-                                    {event.total_awards} Awards
-                                </span>
-                            </div>
-                            <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-muted">
-                                <div
-                                    className="h-full bg-primary transition-all duration-300"
-                                    style={{
-                                        width: `${event.progress_percentage}%`,
-                                    }}
-                                />
-                            </div>
-                            {event.can_view_results && (
-                                <Link
-                                    href={`/voting/${event.slug}/results`}
-                                    className="mt-3 text-center text-xs font-semibold text-primary hover:underline"
-                                >
-                                    View Official Results
-                                </Link>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Authorized Voters Not Yet Voted */}
-                    <div className="mt-6 border-t border-border/60 pt-5">
-                        <div className="flex flex-col gap-3">
-                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="flex flex-wrap items-center gap-2">
-                                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                                        <Users className="h-3.5 w-3.5" />
-                                    </div>
-                                    <span className="text-xs font-semibold text-foreground sm:text-sm">
-                                        Authorized to Vote <span className="font-normal text-muted-foreground">(Not Yet Voted)</span>:
-                                    </span>
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-300">
-                                        <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-                                        {unvoted_voters.length} pending
-                                    </span>
+                        {/* Event Stats Counter */}
+                        <div className="flex items-center gap-4 rounded-xl border border-border/80 bg-muted/40 p-4">
+                            <div className="text-center">
+                                <div className="text-2xl font-black text-foreground">
+                                    {event.completed_awards} / {event.total_awards}
                                 </div>
-
-                                {unvoted_voters.length > 6 && (
-                                    <div className="relative w-full max-w-xs sm:w-60">
-                                        <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                                        <input
-                                            type="text"
-                                            placeholder="Search pending voter..."
-                                            value={voterSearch}
-                                            onChange={(e) =>
-                                                setVoterSearch(e.target.value)
-                                            }
-                                            className="h-7 w-full rounded-lg border border-border/70 bg-background/80 pl-8 pr-2.5 text-xs text-foreground placeholder:text-muted-foreground focus:border-primary focus:outline-hidden"
-                                        />
-                                    </div>
-                                )}
+                                <div className="text-[11px] font-semibold text-muted-foreground uppercase">
+                                    Awards Evaluated
+                                </div>
                             </div>
-
-                            {unvoted_voters.length === 0 ? (
-                                <div className="flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-xs font-medium text-emerald-700 dark:text-emerald-300">
-                                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                                    <span className="font-semibold">
-                                        All authorized voters have cast their votes!
-                                    </span>
+                            <div className="h-8 w-px bg-border/80" />
+                            <div className="text-center">
+                                <div className="text-2xl font-black text-primary">
+                                    {criteriaList.length}
                                 </div>
-                            ) : (
-                                <div className="flex max-h-40 flex-wrap items-center gap-2 overflow-y-auto rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
-                                    {filteredUnvotedVoters.length === 0 ? (
-                                        <div className="py-1 text-xs text-amber-700/80 dark:text-amber-400/80">
-                                            No pending voter matching "{voterSearch}"
-                                        </div>
-                                    ) : (
-                                        filteredUnvotedVoters.map((voter) => (
-                                            <span
-                                                key={voter.id}
-                                                className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/25 bg-amber-500/10 px-3 py-1 text-xs font-medium text-amber-900 shadow-2xs transition-colors hover:border-amber-500/40 hover:bg-amber-500/20 dark:border-amber-500/30 dark:bg-amber-500/15 dark:text-amber-200"
-                                                title={
-                                                    voter.department
-                                                        ? `${formatVoterName(voter.name)} (${voter.department})`
-                                                        : formatVoterName(voter.name)
-                                                }
-                                            >
-                                                <User className="h-3 w-3 shrink-0 text-amber-600 dark:text-amber-400" />
-                                                <span>{formatVoterName(voter.name)}</span>
-                                            </span>
-                                        ))
-                                    )}
+                                <div className="text-[11px] font-semibold text-muted-foreground uppercase">
+                                    Criteria Total
                                 </div>
-                            )}
+                            </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Notifications & Flash Messages */}
+                {/* Flash Messages */}
                 {flash?.success && (
-                    <div className="flex items-center gap-3 rounded-xl border border-emerald-500/20 bg-emerald-500/10 p-4 text-sm font-medium text-emerald-800 dark:text-emerald-300">
-                        <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                    <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs font-semibold text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+                        <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                         <span>{flash.success}</span>
                     </div>
                 )}
                 {flash?.error && (
-                    <div className="flex items-center gap-3 rounded-xl border border-red-500/20 bg-red-500/10 p-4 text-sm font-medium text-red-800 dark:text-red-300">
-                        <ShieldAlert className="h-5 w-5 shrink-0 text-red-600" />
+                    <div className="flex items-center gap-2 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-xs font-semibold text-red-800 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+                        <AlertCircle className="h-4 w-4 shrink-0 text-red-600 dark:text-red-400" />
                         <span>{flash.error}</span>
                     </div>
                 )}
+
+                {/* Overall Warning Banner If Nominees Do Not Have Score */}
+                {event.is_open && event.is_eligible && totalUnscoredCount > 0 && (
+                    <div className="flex flex-col gap-3 rounded-2xl border border-amber-500/40 bg-amber-500/10 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-amber-500/30 dark:bg-amber-500/10">
+                        <div className="flex items-start gap-3">
+                            <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+                            <div>
+                                <h4 className="text-sm font-bold text-amber-950 dark:text-amber-200">
+                                    Notification Warning: {totalUnscoredCount} nominee{totalUnscoredCount === 1 ? '' : 's'} without score!
+                                </h4>
+                                <p className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-300/80">
+                                    Scores are saved directly to the database as you score each nominee. Please ensure every nominee is scored to complete your evaluation.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="shrink-0 self-start sm:self-center">
+                            <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/20 px-3 py-1 font-mono text-xs font-bold text-amber-950 dark:text-amber-200">
+                                <AlertCircle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" />
+                                {totalActiveNomineesCount - totalUnscoredCount} of {totalActiveNomineesCount} Nominees Scored
+                            </span>
+                        </div>
+                    </div>
+                )}
+
+                {/* Eligibility Notice */}
                 {!event.is_eligible && (
-                    <div className="flex items-start gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm font-medium text-red-800 dark:border-red-500/20 dark:bg-red-500/15 dark:text-red-300">
+                    <div className="flex items-start gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-5 text-sm">
                         <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600 dark:text-red-400" />
                         <div>
                             <p className="font-bold text-red-800 dark:text-red-200">
@@ -395,28 +455,11 @@ export default function VotingShow({
                 <div className="flex flex-col gap-10">
                     {awards.map((award, index) => {
                         const isVoted = award.has_voted;
-                        const currentRanks = awardRankings[award.id] ?? {};
-                        const rankedCount = Object.keys(currentRanks).length;
-                        const maxRank = award.max_rank;
-                        const rankOptions = getRankOptions(maxRank);
-                        const isComplete =
-                            rankedCount === maxRank &&
-                            maxRank > 0 &&
-                            new Set(Object.values(currentRanks)).size ===
-                            maxRank;
-
-                        // Check if current rankings differ from recorded user_rankings
-                        const hasChanges = (() => {
-                            const initial = award.user_rankings ?? {};
-                            if (
-                                Object.keys(currentRanks).length !==
-                                Object.keys(initial).length
-                            )
-                                return true;
-                            return Object.entries(currentRanks).some(
-                                ([id, r]) => initial[Number(id)] !== r,
-                            );
-                        })();
+                        const activeNominees = award.nominees.filter(
+                            (n) => n.status === 'active',
+                        );
+                        const unscoredInThisAward = unscoredNomineesByAward[award.id] || [];
+                        const isComplete = activeNominees.length > 0 && unscoredInThisAward.length === 0;
 
                         const canChange =
                             event.is_eligible &&
@@ -427,19 +470,21 @@ export default function VotingShow({
                         return (
                             <section
                                 key={award.id}
-                                className={`rounded-2xl border p-6 transition-all md:p-8 ${isVoted
+                                className={`rounded-2xl border p-6 transition-all md:p-8 ${
+                                    isComplete
                                         ? 'border-emerald-500/30 bg-emerald-500/[0.02] dark:border-emerald-500/20'
                                         : 'border-border bg-card'
-                                    }`}
+                                }`}
                             >
                                 {/* Award Category Header */}
                                 <div className="flex flex-col gap-4 border-b border-border/50 pb-5 md:flex-row md:items-center md:justify-between">
                                     <div className="flex items-start gap-3">
                                         <div
-                                            className={`mt-0.5 rounded-lg p-2.5 ${isVoted
+                                            className={`mt-0.5 rounded-lg p-2.5 ${
+                                                isComplete
                                                     ? 'bg-emerald-500/10 text-emerald-600'
                                                     : 'bg-primary/10 text-primary'
-                                                }`}
+                                            }`}
                                         >
                                             <Award className="h-5 w-5" />
                                         </div>
@@ -448,15 +493,17 @@ export default function VotingShow({
                                                 <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
                                                     Category {index + 1}
                                                 </span>
-                                                {isVoted && (
+                                                {isComplete ? (
                                                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs font-bold text-emerald-600 dark:text-emerald-400">
-                                                        <Check className="h-3 w-3" />{' '}
-                                                        Rankings Recorded
+                                                        <Check className="h-3 w-3" /> All Nominees Scored
                                                     </span>
-                                                )}
+                                                ) : isVoted ? (
+                                                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-bold text-amber-600 dark:text-amber-400">
+                                                        <AlertCircle className="h-3 w-3" /> Partially Scored
+                                                    </span>
+                                                ) : null}
                                                 <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                                                    {maxRank} Nominees (Ranks{' '}
-                                                    {maxRank} down to 1)
+                                                    {activeNominees.length} Nominees
                                                 </span>
                                             </div>
                                             <h2 className="text-xl font-bold tracking-tight text-foreground md:text-2xl">
@@ -470,324 +517,171 @@ export default function VotingShow({
                                         </div>
                                     </div>
 
-                                    {/* Action button & status in award header */}
+                                    {/* Category Status Indicator */}
                                     {event.is_open && award.is_open && (
-                                        <div className="flex flex-wrap items-center gap-3">
-                                            {/* Reset button if changes made */}
-                                            {canChange && rankedCount > 0 && (
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        handleClearAwardRankings(
-                                                            award,
-                                                        )
-                                                    }
-                                                    className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-2 text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                                    title="Clear All Rankings for this category"
-                                                >
-                                                    <RotateCcw className="h-3.5 w-3.5" />
-                                                    Reset
-                                                </button>
-                                            )}
-
-                                            {isVoted &&
-                                                !award.allows_vote_changes ? (
-                                                <div className="flex items-center gap-1.5 rounded-lg bg-muted/60 px-3.5 py-2 text-xs font-medium text-muted-foreground">
-                                                    <Lock className="h-3.5 w-3.5" />
-                                                    Rankings Finalized
+                                        <div className="flex flex-wrap items-center gap-2">
+                                            {isComplete ? (
+                                                <div className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3.5 py-1.5 text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                                                    <CheckCircle2 className="h-4 w-4" />
+                                                    Category Complete
                                                 </div>
                                             ) : (
-                                                <button
-                                                    type="button"
-                                                    onClick={() =>
-                                                        handleOpenConfirm(award)
-                                                    }
-                                                    disabled={
-                                                        !isComplete ||
-                                                        (!hasChanges && isVoted)
-                                                    }
-                                                    className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold shadow-xs transition-all ${!isComplete ||
-                                                            (!hasChanges && isVoted)
-                                                            ? 'cursor-not-allowed bg-muted text-muted-foreground'
-                                                            : 'bg-primary text-primary-foreground hover:bg-primary/90'
-                                                        }`}
-                                                >
-                                                    <Vote className="h-4 w-4" />
-                                                    {isVoted
-                                                        ? hasChanges
-                                                            ? 'Update My Rankings'
-                                                            : 'Rankings Recorded'
-                                                        : isComplete
-                                                            ? 'Submit Rankings'
-                                                            : `Rank All (${rankedCount}/${maxRank})`}
-                                                </button>
+                                                <div className="inline-flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3.5 py-1.5 text-xs font-bold text-amber-700 dark:text-amber-400">
+                                                    <AlertCircle className="h-4 w-4" />
+                                                    {unscoredInThisAward.length} Nominee{unscoredInThisAward.length === 1 ? '' : 's'} Unscored
+                                                </div>
                                             )}
                                         </div>
                                     )}
                                 </div>
 
-                                {/* Ranking Instructions Bar */}
-                                <div className="mt-4 flex flex-col gap-2 rounded-xl border border-primary/15 bg-primary/[0.03] p-3 sm:flex-row sm:items-center sm:justify-between">
-                                    <div className="flex items-center gap-2 text-xs text-foreground">
-                                        <Sparkles className="h-4 w-4 shrink-0 text-amber-500" />
-                                        <span>
-                                            Assign a rank to each nominee from{' '}
-                                            <strong>{maxRank}</strong> (highest
-                                            choice / {maxRank} pts) down to{' '}
-                                            <strong>1</strong> (lowest choice /
-                                            1 pt).
-                                        </span>
-                                    </div>
-                                    <div className="text-xs font-semibold">
-                                        {isComplete ? (
-                                            <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
-                                                <CheckCircle2 className="h-3.5 w-3.5" />{' '}
-                                                All Nominees Ranked
-                                            </span>
-                                        ) : (
-                                            <span className="text-amber-600 dark:text-amber-400">
-                                                {rankedCount} of {maxRank}{' '}
-                                                Nominees Ranked
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-
-                                {/* Nominees Grid */}
+                                {/* Nominees Grid in 5 Columns */}
                                 <div className="mt-6">
-                                    {award.nominees.length === 0 ? (
+                                    {activeNominees.length === 0 ? (
                                         <div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-                                            No nominees registered for this
-                                            award yet.
+                                            No active nominees registered for this award category yet.
                                         </div>
                                     ) : (
                                         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
-                                            {award.nominees.map((nominee) => {
-                                                const assignedRank =
-                                                    currentRanks[nominee.id] ??
-                                                    null;
-                                                const isRanked =
-                                                    assignedRank !== null;
-                                                const isTopChoice =
-                                                    assignedRank === maxRank;
+                                            {activeNominees.map((nominee) => {
+                                                const isScored = isNomineeComplete(award.id, nominee.id);
+                                                const nomineeTotal = getNomineeTotal(award.id, nominee.id);
+                                                const nomineePercentage =
+                                                    totalMaxScore > 0
+                                                        ? Math.round((nomineeTotal / totalMaxScore) * 10000) / 100
+                                                        : 0;
+                                                const nomineeCriteriaScores =
+                                                    awardScores[award.id]?.[nominee.id] || {};
 
                                                 return (
                                                     <div
                                                         key={nominee.id}
-                                                        className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border transition-all ${isTopChoice
-                                                                ? 'border-amber-500/80 bg-amber-500/[0.04] shadow-md ring-2 ring-amber-500/20'
-                                                                : isRanked
-                                                                    ? 'border-primary bg-primary/[0.02] shadow-sm ring-1 ring-primary/20'
-                                                                    : 'border-border/70 bg-card hover:border-border hover:shadow-md'
-                                                            }`}
+                                                        className={`group relative flex flex-col justify-between overflow-hidden rounded-2xl border transition-all ${
+                                                            isScored
+                                                                ? 'border-emerald-500/60 bg-emerald-500/[0.02] shadow-sm ring-1 ring-emerald-500/20'
+                                                                : 'border-amber-500/50 bg-amber-500/[0.02] hover:border-amber-500 hover:shadow-md'
+                                                        }`}
                                                     >
                                                         <div>
-                                                            {/* Large Nominee Photo */}
+                                                            {/* Large Nominee Photo (Aspect 4/3) */}
                                                             <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
                                                                 {nominee.photo_path ? (
                                                                     <img
-                                                                        src={
-                                                                            nominee.photo_path
-                                                                        }
-                                                                        alt={
-                                                                            nominee.name
-                                                                        }
+                                                                        src={nominee.photo_path}
+                                                                        alt={nominee.name}
                                                                         className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
                                                                     />
                                                                 ) : (
                                                                     <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-muted/50 to-muted text-muted-foreground/40">
-                                                                        <User className="h-16 w-16" />
+                                                                        <User className="h-14 w-14" />
                                                                     </div>
                                                                 )}
 
-                                                                {/* Prominent Rank Badge on Photo */}
-                                                                <div className="absolute top-3 right-3">
-                                                                    {isRanked ? (
-                                                                        <div
-                                                                            className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-extrabold shadow-md backdrop-blur-md ${isTopChoice
-                                                                                    ? 'border border-amber-300 bg-amber-500 text-amber-950'
-                                                                                    : assignedRank ===
-                                                                                        maxRank -
-                                                                                        1
-                                                                                        ? 'border border-emerald-300 bg-emerald-500 text-emerald-950'
-                                                                                        : 'border border-border/80 bg-background/90 text-foreground'
-                                                                                }`}
-                                                                        >
-                                                                            {isTopChoice && (
-                                                                                <Crown className="h-3.5 w-3.5 text-amber-950" />
-                                                                            )}
-                                                                            <span>
-                                                                                Rank{' '}
-                                                                                {
-                                                                                    assignedRank
-                                                                                }
-                                                                            </span>
-                                                                            <span className="text-[10px] font-normal opacity-75">
-                                                                                (
-                                                                                {
-                                                                                    assignedRank
-                                                                                }{' '}
-                                                                                pts)
-                                                                            </span>
+                                                                {/* Prominent Score Badge on Photo */}
+                                                                <div className="absolute top-2.5 right-2.5">
+                                                                    {isScored ? (
+                                                                        <div className="inline-flex items-center gap-1 rounded-full border border-emerald-400/40 bg-emerald-600/90 px-2 py-0.5 text-[11px] font-black text-white shadow-md backdrop-blur-md">
+                                                                            <CheckCircle2 className="h-3 w-3" />
+                                                                            <span>{nomineeTotal} pts</span>
                                                                         </div>
                                                                     ) : (
-                                                                        <div className="rounded-full border border-border/80 bg-background/80 px-2 py-0.5 text-[11px] font-medium text-muted-foreground shadow-xs backdrop-blur-md">
-                                                                            Unranked
+                                                                        <div className="inline-flex items-center gap-1 rounded-full border border-amber-500/60 bg-amber-500/90 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs backdrop-blur-md">
+                                                                            <AlertCircle className="h-3 w-3" />
+                                                                            <span>Not Scored</span>
                                                                         </div>
                                                                     )}
                                                                 </div>
 
                                                                 {/* Department Pill */}
                                                                 {nominee.department && (
-                                                                    <div className="absolute bottom-2.5 left-2.5 inline-flex max-w-[85%] items-center gap-1 truncate rounded-md bg-background/90 px-2 py-0.5 text-[11px] font-semibold text-foreground shadow-sm backdrop-blur-sm">
-                                                                        <Building2 className="h-3 w-3 shrink-0 text-primary" />
+                                                                    <div className="absolute bottom-2 left-2 inline-flex max-w-[85%] items-center gap-1 truncate rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] font-semibold text-foreground shadow-xs backdrop-blur-sm">
+                                                                        <Building2 className="h-2.5 w-2.5 shrink-0 text-primary" />
                                                                         <span className="truncate">{nominee.department}</span>
                                                                     </div>
                                                                 )}
                                                             </div>
 
                                                             {/* Card Body */}
-                                                            <div className="p-4">
-                                                                <h3 className="text-base leading-snug font-bold text-foreground">
-                                                                    {
-                                                                        nominee.name
-                                                                    }
+                                                            <div className="p-3.5">
+                                                                <h3 className="text-sm leading-snug font-bold text-foreground line-clamp-1" title={nominee.name}>
+                                                                    {nominee.name}
                                                                 </h3>
-                                                                {nominee.department && (
-                                                                    <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-                                                                        <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
-                                                                        <span className="truncate">
-                                                                            {nominee.department}
-                                                                        </span>
-                                                                    </div>
-                                                                )}
                                                                 {nominee.organization && (
-                                                                    <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-                                                                        <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground/70" />
-                                                                        <span className="truncate">
-                                                                            {nominee.organization}
-                                                                        </span>
+                                                                    <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
+                                                                        <Users className="h-3 w-3 shrink-0" />
+                                                                        <span className="truncate">{nominee.organization}</span>
                                                                     </div>
                                                                 )}
 
-                                                                {/* Biography */}
-                                                                {nominee.description && (
-                                                                    <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                                                                        {
-                                                                            nominee.description
-                                                                        }
-                                                                    </p>
-                                                                )}
+                                                                {/* Final Nominee Score Box */}
+                                                                <div className={`mt-2.5 rounded-xl border p-2 text-center transition-colors ${
+                                                                    isScored
+                                                                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-950 dark:text-emerald-200'
+                                                                        : 'border-amber-500/30 bg-amber-500/10 text-amber-950 dark:text-amber-200'
+                                                                }`}>
+                                                                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
+                                                                        Final Nominee Score
+                                                                    </div>
+                                                                    <div className="font-mono text-sm font-black text-foreground">
+                                                                        {isScored ? (
+                                                                            <span>
+                                                                                {nomineeTotal}{' '}
+                                                                                <span className="text-xs font-semibold text-muted-foreground">/ {totalMaxScore}</span>{' '}
+                                                                                <span className="text-emerald-600 dark:text-emerald-400">({nomineePercentage.toFixed(1)}%)</span>
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                                                                                <AlertCircle className="h-3.5 w-3.5 text-amber-500" /> Pending Score
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+
+                                                                {/* Detailed Criteria Scores Breakdown */}
+                                                                <div className="mt-2.5 rounded-xl border border-border/50 bg-background/60 p-2">
+                                                                    <div className="mb-1 text-[10px] font-bold tracking-wider text-muted-foreground uppercase">
+                                                                        Criteria Scores
+                                                                    </div>
+                                                                    {isScored ? (
+                                                                        <div className="flex flex-col gap-1">
+                                                                            {criteriaList.map((crit) => {
+                                                                                const s = nomineeCriteriaScores[crit.id] ?? 0;
+                                                                                return (
+                                                                                    <div key={crit.id} className="flex items-center justify-between text-[10px]">
+                                                                                        <span className="truncate text-muted-foreground" title={crit.name}>
+                                                                                            {crit.name}
+                                                                                        </span>
+                                                                                        <span className="shrink-0 font-mono font-bold text-foreground">
+                                                                                            {s}/{crit.max_score}
+                                                                                        </span>
+                                                                                    </div>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <div className="py-1 text-center text-[10px] text-amber-700 dark:text-amber-300 italic">
+                                                                            No criteria scores saved yet
+                                                                        </div>
+                                                                    )}
+                                                                </div>
                                                             </div>
                                                         </div>
 
-                                                        {/* Interactive Rank Selector */}
-                                                        <div className="border-t border-border/60 bg-muted/20 p-3.5">
-                                                            <div className="mb-2 flex items-center justify-between text-xs font-semibold text-muted-foreground">
-                                                                <span>
-                                                                    Assign Rank:
-                                                                </span>
-                                                                {isRanked &&
-                                                                    canChange && (
-                                                                        <button
-                                                                            type="button"
-                                                                            onClick={(
-                                                                                e,
-                                                                            ) => {
-                                                                                e.stopPropagation();
-                                                                                handleSetRank(
-                                                                                    award,
-                                                                                    nominee.id,
-                                                                                    null,
-                                                                                );
-                                                                            }}
-                                                                            className="text-[11px] text-muted-foreground hover:text-red-500 hover:underline"
-                                                                        >
-                                                                            Clear
-                                                                        </button>
-                                                                    )}
-                                                            </div>
-
-                                                            {/* Quick Rank Button Row */}
-                                                            <div className="flex items-center gap-1.5">
-                                                                {rankOptions.map(
-                                                                    (r) => {
-                                                                        const isCurrentButtonRank =
-                                                                            assignedRank ===
-                                                                            r;
-                                                                        const isRankTakenInAward =
-                                                                            Object.values(
-                                                                                currentRanks,
-                                                                            ).includes(
-                                                                                r,
-                                                                            );
-                                                                        const isRankTakenByOther =
-                                                                            isRankTakenInAward &&
-                                                                            !isCurrentButtonRank;
-                                                                        const isAvailable =
-                                                                            canChange &&
-                                                                            !isRankTakenInAward;
-                                                                        const isDisabled =
-                                                                            !canChange ||
-                                                                            isRankTakenInAward;
-
-                                                                        return (
-                                                                            <button
-                                                                                key={
-                                                                                    r
-                                                                                }
-                                                                                type="button"
-                                                                                disabled={
-                                                                                    isDisabled
-                                                                                }
-                                                                                onClick={() =>
-                                                                                    handleSetRank(
-                                                                                        award,
-                                                                                        nominee.id,
-                                                                                        r,
-                                                                                    )
-                                                                                }
-                                                                                className={`flex flex-1 min-w-0 flex-col items-center justify-center rounded-lg px-1 py-1.5 text-xs font-bold transition-all ${
-                                                                                    isCurrentButtonRank
-                                                                                        ? r ===
-                                                                                          maxRank
-                                                                                            ? 'bg-amber-500 text-amber-950 shadow-sm ring-2 ring-amber-400 font-extrabold cursor-default'
-                                                                                            : 'bg-blue-700 text-white shadow-sm ring-2 ring-blue-400 font-extrabold cursor-default dark:bg-blue-600'
-                                                                                        : isAvailable
-                                                                                          ? 'cursor-pointer border border-blue-500/40 bg-blue-600 text-white shadow-xs hover:scale-[1.02] hover:bg-blue-500 active:bg-blue-700'
-                                                                                          : 'cursor-not-allowed border border-neutral-200/80 bg-neutral-100 text-neutral-400 opacity-40 dark:border-neutral-700/60 dark:bg-neutral-800/60 dark:text-neutral-500'
-                                                                                }`}
-                                                                                title={
-                                                                                    isCurrentButtonRank
-                                                                                        ? `Rank ${r} selected for this nominee`
-                                                                                        : isRankTakenByOther
-                                                                                          ? `Rank ${r} is already selected by another nominee`
-                                                                                          : isAvailable
-                                                                                            ? `Assign Rank ${r} (${r === maxRank ? 'Highest Choice' : `${r} pts`})`
-                                                                                            : `Rank ${r} unavailable`
-                                                                                }
-                                                                            >
-                                                                                <span className="flex items-center gap-0.5">
-                                                                                    {isCurrentButtonRank &&
-                                                                                        r ===
-                                                                                            maxRank && (
-                                                                                            <Crown className="h-2.5 w-2.5 text-amber-950" />
-                                                                                        )}
-                                                                                    {
-                                                                                        r
-                                                                                    }
-                                                                                </span>
-                                                                                <span className="text-[9px] font-normal opacity-85">
-                                                                                    {r ===
-                                                                                    maxRank
-                                                                                        ? 'Top'
-                                                                                        : `${r}p`}
-                                                                                </span>
-                                                                            </button>
-                                                                        );
-                                                                    },
-                                                                )}
-                                                            </div>
+                                                        {/* Card Footer: Button for Criteria Score */}
+                                                        <div className="border-t border-border/60 bg-muted/20 p-3">
+                                                            <button
+                                                                type="button"
+                                                                disabled={!canChange}
+                                                                onClick={() => handleOpenScoringModal(award, nominee)}
+                                                                className={`w-full inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold shadow-2xs transition-colors ${
+                                                                    isScored
+                                                                        ? 'border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20'
+                                                                        : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
+                                                                }`}
+                                                            >
+                                                                <Sliders className="h-3.5 w-3.5" />
+                                                                {isScored ? 'Edit Criteria Scores' : 'Score Criteria'}
+                                                            </button>
                                                         </div>
                                                     </div>
                                                 );
@@ -801,149 +695,188 @@ export default function VotingShow({
                 </div>
             </div>
 
-            {/* Confirmation Modal */}
-            {modalAward && (
+            {/* Individual Nominee Criteria Scoring Modal */}
+            {scoringModal && (
                 <div className="fixed inset-0 z-50 flex animate-in items-center justify-center bg-black/60 p-4 backdrop-blur-sm duration-200 fade-in">
-                    <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 shadow-2xl">
-                        <div className="flex items-center gap-3">
-                            <div className="rounded-full bg-primary/10 p-3 text-primary">
-                                <Trophy className="h-6 w-6" />
+                    <div className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
+                        {/* Header */}
+                        <div className="flex items-start justify-between border-b border-border/60 pb-4">
+                            <div className="flex items-center gap-3.5">
+                                <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted">
+                                    {scoringModal.nominee.photo_path ? (
+                                        <img
+                                            src={scoringModal.nominee.photo_path}
+                                            alt={scoringModal.nominee.name}
+                                            className="h-full w-full object-cover"
+                                        />
+                                    ) : (
+                                        <User className="h-6 w-6 text-muted-foreground/60" />
+                                    )}
+                                </div>
+                                <div>
+                                    <div className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                                        Criteria Rating • {scoringModal.award.name}
+                                    </div>
+                                    <h3 className="text-lg font-bold text-foreground">
+                                        {scoringModal.nominee.name}
+                                    </h3>
+                                    {scoringModal.nominee.department && (
+                                        <div className="text-xs text-muted-foreground">
+                                            {scoringModal.nominee.department}
+                                        </div>
+                                    )}
+                                </div>
                             </div>
-                            <div>
-                                <h3 className="text-lg font-bold text-foreground">
-                                    Confirm Your Rankings
-                                </h3>
-                                <p className="text-xs text-muted-foreground">
-                                    Please review your ranked nominees before
-                                    final submission
-                                </p>
-                            </div>
+
+                            <button
+                                type="button"
+                                onClick={() => setScoringModal(null)}
+                                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
                         </div>
 
-                        <div className="mt-5 rounded-xl border border-border/60 bg-muted/40 p-4">
-                            <div className="text-xs font-medium tracking-wider text-muted-foreground uppercase">
-                                Award Category
-                            </div>
-                            <div className="mt-0.5 text-base font-bold text-foreground">
-                                {modalAward.name}
-                            </div>
+                        {/* Criteria Inputs */}
+                        <div className="mt-4 flex flex-col gap-3">
+                            <p className="text-xs text-muted-foreground">
+                                Rate this nominee for each criterion from 0 up to its maximum score. When saved, the score is saved directly to the database.
+                            </p>
 
-                            {/* Ranked Nominees List ordered from maxRank down to 1 */}
-                            <div className="mt-4 flex flex-col gap-2.5 border-t border-border/60 pt-3.5">
-                                {(() => {
-                                    const currentRanks =
-                                        awardRankings[modalAward.id] ?? {};
-                                    const sortedList = [
-                                        ...modalAward.nominees,
-                                    ].sort((a, b) => {
-                                        const rA = currentRanks[a.id] ?? 0;
-                                        const rB = currentRanks[b.id] ?? 0;
-                                        return rB - rA; // Descending: 5, 4, 3, 2, 1
-                                    });
+                            {criteriaList.map((criterion, idx) => {
+                                const currentVal = modalCriterionScores[criterion.id] ?? '';
+                                const numVal = parseFloat(currentVal || '0') || 0;
+                                const isOver = numVal > criterion.max_score;
 
-                                    return sortedList.map((nominee) => {
-                                        const r = currentRanks[nominee.id] ?? 0;
-                                        const isTop = r === modalAward.max_rank;
-
-                                        return (
-                                            <div
-                                                key={nominee.id}
-                                                className={`flex items-center justify-between rounded-xl border p-2.5 text-xs ${isTop
-                                                        ? 'border-amber-500/50 bg-amber-500/10 text-amber-900 dark:text-amber-200'
-                                                        : 'border-border/60 bg-card text-foreground'
-                                                    }`}
-                                            >
-                                                <div className="flex items-center gap-3">
-                                                    <span
-                                                        className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full font-bold ${isTop
-                                                                ? 'bg-amber-500 text-amber-950'
-                                                                : 'bg-muted text-foreground'
-                                                            }`}
-                                                    >
-                                                        {r}
-                                                    </span>
-                                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted">
-                                                        {nominee.photo_path ? (
-                                                            <img
-                                                                src={
-                                                                    nominee.photo_path
-                                                                }
-                                                                alt={
-                                                                    nominee.name
-                                                                }
-                                                                className="h-full w-full object-cover"
-                                                            />
-                                                        ) : (
-                                                            <User className="h-5 w-5 text-muted-foreground/60" />
-                                                        )}
-                                                    </div>
-                                                    <div>
-                                                        <div className="font-bold">
-                                                            {nominee.name}
-                                                        </div>
-                                                        {nominee.department && (
-                                                            <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                                                <Building2 className="h-3 w-3 shrink-0" />
-                                                                <span>{nominee.department}</span>
-                                                            </div>
-                                                        )}
-                                                        {nominee.organization && (
-                                                            <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                                                                <Users className="h-3 w-3 shrink-0" />
-                                                                <span>{nominee.organization}</span>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-
-                                                <div className="text-right">
-                                                    <span className="text-xs font-extrabold">
-                                                        {r} pts
-                                                    </span>
-                                                    {isTop && (
-                                                        <div className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                                                            Top Choice
-                                                        </div>
-                                                    )}
-                                                </div>
+                                return (
+                                    <div
+                                        key={criterion.id}
+                                        className={`flex flex-col gap-2 rounded-xl border p-3.5 sm:flex-row sm:items-center sm:justify-between ${
+                                            isOver
+                                                ? 'border-red-500/50 bg-red-500/5'
+                                                : 'border-border/70 bg-background/50'
+                                        }`}
+                                    >
+                                        <div className="min-w-0 flex-1">
+                                            <div className="flex items-center gap-2">
+                                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                                                    {idx + 1}
+                                                </span>
+                                                <span className="text-xs font-bold text-foreground">
+                                                    {criterion.name}
+                                                </span>
                                             </div>
-                                        );
-                                    });
-                                })()}
-                            </div>
+                                            {criterion.description && (
+                                                <p className="mt-1 pl-7 text-[11px] text-muted-foreground">
+                                                    {criterion.description}
+                                                </p>
+                                            )}
+                                        </div>
+
+                                        <div className="flex items-center gap-2 pl-7 sm:pl-0">
+                                            <div className="relative">
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    max={criterion.max_score}
+                                                    step={0.5}
+                                                    placeholder="0"
+                                                    value={currentVal}
+                                                    onChange={(e) => {
+                                                        const val = e.target.value;
+                                                        setModalCriterionScores((prev) => ({
+                                                            ...prev,
+                                                            [criterion.id]: val,
+                                                        }));
+                                                    }}
+                                                    className={`w-24 rounded-lg border bg-card px-2.5 py-1.5 text-center text-sm font-bold text-foreground focus:ring-2 focus:ring-primary/20 focus:outline-none ${
+                                                        isOver
+                                                            ? 'border-red-500 text-red-600'
+                                                            : 'border-border focus:border-primary'
+                                                    }`}
+                                                />
+                                            </div>
+                                            <span className="text-xs font-bold text-muted-foreground shrink-0">
+                                                / {criterion.max_score} pts
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })}
                         </div>
 
-                        {!modalAward.allows_vote_changes && (
-                            <div className="mt-4 flex items-start gap-2.5 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
-                                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                                <span>
-                                    Vote changing is disabled for this award.
-                                    Once submitted, your rankings are final and
-                                    cannot be modified.
-                                </span>
-                            </div>
-                        )}
+                        {/* Modal Live Summary */}
+                        {(() => {
+                            const total = criteriaList.reduce((sum, c) => {
+                                const raw = modalCriterionScores[c.id];
+                                const v = parseFloat(raw || '0');
+                                return sum + (isNaN(v) ? 0 : v);
+                            }, 0);
+                            const pct =
+                                totalMaxScore > 0
+                                    ? Math.round((total / totalMaxScore) * 10000) / 100
+                                    : 0;
+                            const hasErrors = criteriaList.some((c) => {
+                                const v = parseFloat(modalCriterionScores[c.id] || '0');
+                                return v < 0 || v > c.max_score;
+                            });
 
-                        <div className="mt-6 flex items-center justify-end gap-3">
-                            <button
-                                type="button"
-                                onClick={() => setModalAward(null)}
-                                disabled={submitting}
-                                className="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-foreground transition-colors hover:bg-muted"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleConfirmVote}
-                                disabled={submitting}
-                                className="inline-flex items-center gap-2 rounded-lg bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
-                            >
-                                {submitting
-                                    ? 'Submitting Rankings...'
-                                    : 'Confirm & Submit Rankings'}
-                            </button>
-                        </div>
+                            return (
+                                <div className="mt-5 rounded-xl border border-primary/20 bg-primary/[0.03] p-4">
+                                    <div className="flex items-center justify-between">
+                                        <div>
+                                            <div className="text-[11px] font-semibold text-muted-foreground uppercase">
+                                                Computed Nominee Score
+                                            </div>
+                                            <div className="font-mono text-xl font-black text-foreground">
+                                                {total.toFixed(1)}{' '}
+                                                <span className="text-xs font-semibold text-muted-foreground">
+                                                    / {totalMaxScore} pts
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div className="rounded-lg bg-emerald-500/10 px-3 py-1.5 font-mono text-base font-black text-emerald-600 dark:text-emerald-400">
+                                            {pct.toFixed(1)}%
+                                        </div>
+                                    </div>
+
+                                    {hasErrors && (
+                                        <p className="mt-2 text-xs font-semibold text-red-500">
+                                            Some scores exceed the maximum allowed for that criterion.
+                                        </p>
+                                    )}
+
+                                    <div className="mt-5 flex items-center justify-end gap-3 border-t border-border/60 pt-4">
+                                        <button
+                                            type="button"
+                                            disabled={savingNominee}
+                                            onClick={() => setScoringModal(null)}
+                                            className="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            type="button"
+                                            disabled={hasErrors || savingNominee}
+                                            onClick={handleSaveModalScores}
+                                            className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50"
+                                        >
+                                            {savingNominee ? (
+                                                <>
+                                                    <LoaderCircle className="h-4 w-4 animate-spin" />
+                                                    Saving to Database...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Check className="h-4 w-4" />
+                                                    Save Nominee Score
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                            );
+                        })()}
                     </div>
                 </div>
             )}

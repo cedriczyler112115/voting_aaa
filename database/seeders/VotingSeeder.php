@@ -221,14 +221,23 @@ class VotingSeeder extends Seeder
             ],
         ];
 
-        foreach ($criteriaData as $crit) {
-            \App\Models\VotingCriteria::firstOrCreate(
-                [
-                    'voting_event_id' => $event->id,
-                    'name' => $crit['name'],
-                ],
-                $crit
-            );
+        $awards = \App\Models\VotingAward::where('voting_event_id', $event->id)->get();
+        foreach ($awards as $award) {
+            foreach ($criteriaData as $crit) {
+                \App\Models\VotingCriterion::firstOrCreate(
+                    [
+                        'voting_award_id' => $award->id,
+                        'name' => $crit['name'],
+                    ],
+                    [
+                        'voting_event_id' => $event->id,
+                        'voting_award_id' => $award->id,
+                        'description' => $crit['description'],
+                        'max_score' => $crit['percentage'],
+                        'display_order' => $crit['display_order'],
+                    ]
+                );
+            }
         }
     }
 }

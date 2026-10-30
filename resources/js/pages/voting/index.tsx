@@ -150,13 +150,6 @@ export default function VotingIndex({ events }: Props) {
                                                     Closed
                                                 </span>
                                             )}
-
-                                            {!event.is_eligible && (
-                                                <span className="inline-flex items-center gap-1 rounded-full bg-red-500/15 px-2.5 py-0.5 text-xs font-semibold text-red-600 dark:text-red-400">
-                                                    <ShieldAlert className="h-3.5 w-3.5" />
-                                                    Not Allowed to Vote
-                                                </span>
-                                            )}
                                         </div>
 
                                         {/* Title & Description */}
@@ -267,17 +260,7 @@ export default function VotingIndex({ events }: Props) {
                                             </span>
                                         )}
 
-                                        {!event.is_eligible ? (
-                                            <button
-                                                type="button"
-                                                disabled
-                                                className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-lg border border-red-500/30 bg-red-500/10 px-4 py-2 text-xs font-semibold text-red-600 opacity-80 shadow-none dark:border-red-500/20 dark:bg-red-500/15 dark:text-red-400"
-                                                title="You are not allowed to vote in this event"
-                                            >
-                                                <Lock className="h-3.5 w-3.5" />
-                                                Not Allowed to Vote
-                                            </button>
-                                        ) : (
+                                        {event.is_eligible && (
                                             <Link
                                                 href={`/voting/${event.slug}`}
                                                 className={`inline-flex items-center gap-1.5 rounded-lg px-4 py-2 text-xs font-medium transition-colors ${

@@ -3,12 +3,14 @@ import {
     AlertCircle,
     ArrowLeft,
     Award,
+    Briefcase,
     Building2,
     Check,
     CheckCircle2,
     Crown,
     LoaderCircle,
     Lock,
+    MapPin,
     Search,
     ShieldAlert,
     Sliders,
@@ -51,6 +53,8 @@ type AwardItem = {
     allows_vote_changes: boolean;
     has_voted: boolean;
     nominees_count: number;
+    criteria?: CriterionItem[];
+    total_criteria_score?: number;
     user_scores?: Record<
         number,
         { score: number; criteria_scores: Record<number, number> }
@@ -173,14 +177,24 @@ export default function VotingShow({
         );
     }, [unvoted_voters, voterSearch]);
 
-    const criteriaList = event.criteria || [];
-    const totalMaxScore = event.total_criteria_score || 100;
+    const getAwardCriteria = (award?: AwardItem | null): CriterionItem[] => {
+        if (!award) return event.criteria || [];
+        if (award.criteria && award.criteria.length > 0) return award.criteria;
+        return event.criteria || [];
+    };
+
+    const getAwardTotalCriteriaScore = (award?: AwardItem | null): number => {
+        if (!award) return event.total_criteria_score || 100;
+        if (award.total_criteria_score && award.total_criteria_score > 0) return award.total_criteria_score;
+        return event.total_criteria_score || 100;
+    };
 
     // Open criteria scoring modal for a specific nominee
     const handleOpenScoringModal = (award: AwardItem, nominee: NomineeItem) => {
         const existing = awardScores[award.id]?.[nominee.id] || {};
         const initial: Record<number, string> = {};
-        criteriaList.forEach((c) => {
+        const awardCriteria = getAwardCriteria(award);
+        awardCriteria.forEach((c) => {
             initial[c.id] =
                 existing[c.id] !== undefined && existing[c.id] !== null
                     ? String(existing[c.id])
@@ -194,9 +208,10 @@ export default function VotingShow({
     const handleSaveModalScores = () => {
         if (!scoringModal || savingNominee) return;
         const { award, nominee } = scoringModal;
+        const awardCriteria = getAwardCriteria(award);
         const cleaned: Record<number, number> = {};
 
-        criteriaList.forEach((c) => {
+        awardCriteria.forEach((c) => {
             const raw = modalCriterionScores[c.id];
             let val = parseFloat(raw || '0');
             if (isNaN(val) || val < 0) val = 0;
@@ -242,13 +257,14 @@ export default function VotingShow({
 
     // Check if nominee has scores recorded for all criteria
     const isNomineeComplete = (
-        awardId: number,
+        award: AwardItem,
         nomineeId: number,
     ): boolean => {
-        if (criteriaList.length === 0) return false;
-        const nomineeCriteria = awardScores[awardId]?.[nomineeId];
+        const awardCriteria = getAwardCriteria(award);
+        if (awardCriteria.length === 0) return false;
+        const nomineeCriteria = awardScores[award.id]?.[nomineeId];
         if (!nomineeCriteria || Object.keys(nomineeCriteria).length === 0) return false;
-        return criteriaList.every(
+        return awardCriteria.every(
             (c) =>
                 nomineeCriteria[c.id] !== undefined &&
                 nomineeCriteria[c.id] !== null &&
@@ -261,10 +277,10 @@ export default function VotingShow({
         const map: Record<number, NomineeItem[]> = {};
         awards.forEach((award) => {
             const active = award.nominees.filter((n) => n.status === 'active');
-            map[award.id] = active.filter((n) => !isNomineeComplete(award.id, n.id));
+            map[award.id] = active.filter((n) => !isNomineeComplete(award, n.id));
         });
         return map;
-    }, [awards, awardScores, criteriaList]);
+    }, [awards, awardScores]);
 
     // Total count of unscored nominees across all active awards
     const totalUnscoredCount = useMemo(() => {
@@ -284,9 +300,10 @@ export default function VotingShow({
     // Check if an award category is completely scored
     const isAwardComplete = (award: AwardItem): boolean => {
         const activeNominees = award.nominees.filter((n) => n.status === 'active');
-        if (activeNominees.length === 0 || criteriaList.length === 0) return false;
+        const awardCriteria = getAwardCriteria(award);
+        if (activeNominees.length === 0 || awardCriteria.length === 0) return false;
         return activeNominees.every((nominee) =>
-            isNomineeComplete(award.id, nominee.id),
+            isNomineeComplete(award, nominee.id),
         );
     };
 
@@ -294,10 +311,11 @@ export default function VotingShow({
     const hasAwardChanges = (award: AwardItem): boolean => {
         if (!award.has_voted) return true;
         const currentAward = awardScores[award.id] || {};
+        const awardCriteria = getAwardCriteria(award);
         for (const nominee of award.nominees) {
             const currentNominee = currentAward[nominee.id] || {};
             const initialNominee = nominee.user_criteria_scores || {};
-            for (const criterion of criteriaList) {
+            for (const criterion of awardCriteria) {
                 const cVal = currentNominee[criterion.id] ?? 0;
                 const iVal = initialNominee[criterion.id] ?? 0;
                 if (cVal !== iVal) return true;
@@ -387,10 +405,10 @@ export default function VotingShow({
                             <div className="h-8 w-px bg-border/80" />
                             <div className="text-center">
                                 <div className="text-2xl font-black text-primary">
-                                    {criteriaList.length}
+                                    {awards.reduce((sum, a) => sum + getAwardCriteria(a).length, 0)}
                                 </div>
                                 <div className="text-[11px] font-semibold text-muted-foreground uppercase">
-                                    Criteria Total
+                                    Total Criteria
                                 </div>
                             </div>
                         </div>
@@ -544,11 +562,12 @@ export default function VotingShow({
                                     ) : (
                                         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
                                             {activeNominees.map((nominee) => {
-                                                const isScored = isNomineeComplete(award.id, nominee.id);
+                                                const isScored = isNomineeComplete(award, nominee.id);
                                                 const nomineeTotal = getNomineeTotal(award.id, nominee.id);
+                                                const awardMaxScore = getAwardTotalCriteriaScore(award);
                                                 const nomineePercentage =
-                                                    totalMaxScore > 0
-                                                        ? Math.round((nomineeTotal / totalMaxScore) * 10000) / 100
+                                                    awardMaxScore > 0
+                                                        ? Math.round((nomineeTotal / awardMaxScore) * 10000) / 100
                                                         : 0;
                                                 const nomineeCriteriaScores =
                                                     awardScores[award.id]?.[nominee.id] || {};
@@ -591,14 +610,6 @@ export default function VotingShow({
                                                                         </div>
                                                                     )}
                                                                 </div>
-
-                                                                {/* Department Pill */}
-                                                                {nominee.department && (
-                                                                    <div className="absolute bottom-2 left-2 inline-flex max-w-[85%] items-center gap-1 truncate rounded-md bg-background/90 px-1.5 py-0.5 text-[10px] font-semibold text-foreground shadow-xs backdrop-blur-sm">
-                                                                        <Building2 className="h-2.5 w-2.5 shrink-0 text-primary" />
-                                                                        <span className="truncate">{nominee.department}</span>
-                                                                    </div>
-                                                                )}
                                                             </div>
 
                                                             {/* Card Body */}
@@ -606,9 +617,15 @@ export default function VotingShow({
                                                                 <h3 className="text-sm leading-snug font-bold text-foreground line-clamp-1" title={nominee.name}>
                                                                     {nominee.name}
                                                                 </h3>
+                                                                {nominee.department && (
+                                                                    <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground" title={`Designation: ${nominee.department}`}>
+                                                                        <Briefcase className="h-3 w-3 shrink-0 text-primary/70" />
+                                                                        <span className="truncate">{nominee.department}</span>
+                                                                    </div>
+                                                                )}
                                                                 {nominee.organization && (
-                                                                    <div className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
-                                                                        <Users className="h-3 w-3 shrink-0" />
+                                                                    <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground" title={`Area of Assignment: ${nominee.organization}`}>
+                                                                        <MapPin className="h-3 w-3 shrink-0 text-muted-foreground/70" />
                                                                         <span className="truncate">{nominee.organization}</span>
                                                                     </div>
                                                                 )}
@@ -626,7 +643,7 @@ export default function VotingShow({
                                                                         {isScored ? (
                                                                             <span>
                                                                                 {nomineeTotal}{' '}
-                                                                                <span className="text-xs font-semibold text-muted-foreground">/ {totalMaxScore}</span>{' '}
+                                                                                <span className="text-xs font-semibold text-muted-foreground">/ {awardMaxScore}</span>{' '}
                                                                                 <span className="text-emerald-600 dark:text-emerald-400">({nomineePercentage.toFixed(1)}%)</span>
                                                                             </span>
                                                                         ) : (
@@ -644,7 +661,7 @@ export default function VotingShow({
                                                                     </div>
                                                                     {isScored ? (
                                                                         <div className="flex flex-col gap-1">
-                                                                            {criteriaList.map((crit) => {
+                                                                            {getAwardCriteria(award).map((crit) => {
                                                                                 const s = nomineeCriteriaScores[crit.id] ?? 0;
                                                                                 return (
                                                                                     <div key={crit.id} className="flex items-center justify-between text-[10px]">
@@ -740,10 +757,10 @@ export default function VotingShow({
                         {/* Criteria Inputs */}
                         <div className="mt-4 flex flex-col gap-3">
                             <p className="text-xs text-muted-foreground">
-                                Rate this nominee for each criterion from 0 up to its maximum score. When saved, the score is saved directly to the database.
+                                Rate this nominee for each criterion from 0 up to its maximum score for the <span className="font-semibold text-foreground">"{scoringModal?.award.name}"</span> category. When saved, the score is saved directly to the database.
                             </p>
 
-                            {criteriaList.map((criterion, idx) => {
+                            {getAwardCriteria(scoringModal?.award).map((criterion, idx) => {
                                 const currentVal = modalCriterionScores[criterion.id] ?? '';
                                 const numVal = parseFloat(currentVal || '0') || 0;
                                 const isOver = numVal > criterion.max_score;
@@ -807,16 +824,18 @@ export default function VotingShow({
 
                         {/* Modal Live Summary */}
                         {(() => {
-                            const total = criteriaList.reduce((sum, c) => {
+                            const modalCriteria = getAwardCriteria(scoringModal?.award);
+                            const modalTotalMax = getAwardTotalCriteriaScore(scoringModal?.award);
+                            const total = modalCriteria.reduce((sum, c) => {
                                 const raw = modalCriterionScores[c.id];
                                 const v = parseFloat(raw || '0');
                                 return sum + (isNaN(v) ? 0 : v);
                             }, 0);
                             const pct =
-                                totalMaxScore > 0
-                                    ? Math.round((total / totalMaxScore) * 10000) / 100
+                                modalTotalMax > 0
+                                    ? Math.round((total / modalTotalMax) * 10000) / 100
                                     : 0;
-                            const hasErrors = criteriaList.some((c) => {
+                            const hasErrors = modalCriteria.some((c) => {
                                 const v = parseFloat(modalCriterionScores[c.id] || '0');
                                 return v < 0 || v > c.max_score;
                             });
@@ -831,7 +850,7 @@ export default function VotingShow({
                                             <div className="font-mono text-xl font-black text-foreground">
                                                 {total.toFixed(1)}{' '}
                                                 <span className="text-xs font-semibold text-muted-foreground">
-                                                    / {totalMaxScore} pts
+                                                    / {modalTotalMax} pts
                                                 </span>
                                             </div>
                                         </div>

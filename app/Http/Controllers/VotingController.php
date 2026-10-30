@@ -129,11 +129,16 @@ class VotingController extends Controller
                     $query->where('status', 'active')
                         ->orderBy('display_order')
                         ->orderBy('id')
-                        ->with(['nominees' => function ($nQuery) {
-                            $nQuery->where('status', 'active')
-                                ->orderBy('display_order')
-                                ->orderBy('id');
-                        }]);
+                        ->with([
+                            'criteria' => function ($cQuery) {
+                                $cQuery->orderBy('display_order')->orderBy('id');
+                            },
+                            'nominees' => function ($nQuery) {
+                                $nQuery->where('status', 'active')
+                                    ->orderBy('display_order')
+                                    ->orderBy('id');
+                            },
+                        ]);
                 },
             ])
             ->where('slug', $slug)
@@ -160,12 +165,14 @@ class VotingController extends Controller
             }
         }
 
-        $awards = $event->awards->map(function (VotingAward $award) use ($userVotes) {
+        $awards = $event->awards->map(function (VotingAward $award) use ($userVotes, $event) {
             $awardUserVotes = $userVotes[$award->id] ?? [];
             $activeNominees = $award->nominees->where('status', 'active');
             $nomineesCount = $activeNominees->count();
             $scoredCount = count($awardUserVotes);
             $hasVoted = $nomineesCount > 0 && $scoredCount >= $nomineesCount;
+
+            $awardCriteria = $award->criteria->isNotEmpty() ? $award->criteria : $event->criteria;
 
             return [
                 'id' => $award->id,
@@ -178,6 +185,15 @@ class VotingController extends Controller
                 'nominees_count' => $nomineesCount,
                 'scored_nominees_count' => $scoredCount,
                 'unscored_nominees_count' => max(0, $nomineesCount - $scoredCount),
+                'total_criteria_score' => (float) $awardCriteria->sum('max_score'),
+                'criteria' => $awardCriteria->map(fn (VotingCriterion $c) => [
+                    'id' => $c->id,
+                    'voting_award_id' => $c->voting_award_id,
+                    'name' => $c->name,
+                    'description' => $c->description,
+                    'max_score' => (float) $c->max_score,
+                    'display_order' => $c->display_order,
+                ]),
                 'user_scores' => $awardUserVotes,
                 'nominees' => $award->nominees->map(fn (VotingNominee $nominee) => [
                     'id' => $nominee->id,
@@ -277,6 +293,9 @@ class VotingController extends Controller
 
         $award = VotingAward::query()
             ->with([
+                'criteria' => function ($q) {
+                    $q->orderBy('display_order')->orderBy('id');
+                },
                 'event.criteria' => function ($q) {
                     $q->orderBy('display_order')->orderBy('id');
                 },
@@ -288,7 +307,7 @@ class VotingController extends Controller
             ->firstOrFail();
 
         $event = $award->event;
-        $criteria = $event->criteria;
+        $criteria = $award->criteria->isNotEmpty() ? $award->criteria : $event->criteria;
 
         $nominee = $award->nominees->firstWhere('id', $validated['voting_nominee_id']);
         if (! $nominee) {
@@ -296,7 +315,7 @@ class VotingController extends Controller
         }
 
         if ($criteria->isEmpty()) {
-            return back()->with('error', 'No evaluation criteria configured for this event. Please contact the administrator.');
+            return back()->with('error', "No evaluation criteria configured for the '{$award->name}' category. Please contact the administrator.");
         }
 
         if (! $event->isUserEligible($user)) {
@@ -410,6 +429,9 @@ class VotingController extends Controller
         // 1. Fetch award and verify parent event, criteria, and active nominees
         $award = VotingAward::query()
             ->with([
+                'criteria' => function ($q) {
+                    $q->orderBy('display_order')->orderBy('id');
+                },
                 'event.criteria' => function ($q) {
                     $q->orderBy('display_order')->orderBy('id');
                 },
@@ -421,7 +443,7 @@ class VotingController extends Controller
             ->firstOrFail();
 
         $event = $award->event;
-        $criteria = $event->criteria;
+        $criteria = $award->criteria->isNotEmpty() ? $award->criteria : $event->criteria;
         $activeNominees = $award->nominees;
         $nomineesCount = $activeNominees->count();
 
@@ -430,7 +452,7 @@ class VotingController extends Controller
         }
 
         if ($criteria->isEmpty()) {
-            return back()->with('error', 'No evaluation criteria configured for this event. Please contact the administrator.');
+            return back()->with('error', "No evaluation criteria configured for the '{$award->name}' category. Please contact the administrator.");
         }
 
         // 2. Validate user eligibility
@@ -852,6 +874,7 @@ class VotingController extends Controller
         $canReveal = $user && ($user->isAdmin() || (int) $user->id === 2);
 
         $award->load([
+            'criteria' => fn ($q) => $q->orderBy('display_order')->orderBy('id'),
             'event.criteria' => fn ($q) => $q->orderBy('display_order')->orderBy('id'),
             'nominees.votes.voter',
             'nominees.votes.scores.criterion',
@@ -863,7 +886,7 @@ class VotingController extends Controller
         $isRevealDateReached = $event->isRevealDateReached();
         $shouldRevealNominee = $canReveal || $isRevealDateReached;
 
-        $criteria = $event->criteria;
+        $criteria = $award->criteria->isNotEmpty() ? $award->criteria : $event->criteria;
         $totalCriteriaScore = $criteria->sum('max_score') ?: 100;
 
         // Get ranked nominees using the standard 50% DC + 50% SH formula

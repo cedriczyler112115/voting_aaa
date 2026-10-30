@@ -59,9 +59,9 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->name('admin.')->group(fun
     Route::post('/events/{event}/voters/allow-all', [VotingEventController::class, 'allowAllVoters'])->name('events.voters.allow-all');
     Route::post('/events/{event}/voters/clear', [VotingEventController::class, 'clearAllowedVoters'])->name('events.voters.clear');
 
-    // Event Criteria Management (Dynamic CRUD criteria totaling 100%)
-    Route::post('/events/{event}/criteria', [VotingCriterionController::class, 'store'])->name('events.criteria.store');
-    Route::post('/events/{event}/criteria/defaults', [VotingCriterionController::class, 'loadDefaults'])->name('events.criteria.defaults');
+    // Award Category Criteria Management (Dynamic CRUD criteria per award category totaling 100%)
+    Route::post('/awards/{award}/criteria', [VotingCriterionController::class, 'store'])->name('awards.criteria.store');
+    Route::post('/awards/{award}/criteria/copy-to-all', [VotingCriterionController::class, 'copyToAll'])->name('awards.criteria.copy-to-all');
     Route::put('/criteria/{criterion}', [VotingCriterionController::class, 'update'])->name('criteria.update');
     Route::delete('/criteria/{criterion}', [VotingCriterionController::class, 'destroy'])->name('criteria.destroy');
 

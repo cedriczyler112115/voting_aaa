@@ -26,6 +26,8 @@ use Illuminate\Support\Carbon;
  * @property Carbon|null $updated_at
  * @property-read Collection<int, VotingNominee> $nominees
  * @property-read Collection<int, VotingVote> $votes
+ * @property-read Collection<int, VotingCriterion> $criteria
+ * @property-read float $total_criteria_score
  * @property-read VotingEvent $event
  */
 class VotingAward extends Model
@@ -85,6 +87,24 @@ class VotingAward extends Model
     public function votes(): HasMany
     {
         return $this->hasMany(VotingVote::class, 'voting_award_id');
+    }
+
+    /**
+     * @return HasMany<VotingCriterion, $this>
+     */
+    public function criteria(): HasMany
+    {
+        return $this->hasMany(VotingCriterion::class, 'voting_award_id')->orderBy('display_order')->orderBy('id');
+    }
+
+    /**
+     * Get the total maximum criteria score for this award.
+     */
+    public function getTotalCriteriaScoreAttribute(): float
+    {
+        return (float) ($this->relationLoaded('criteria')
+            ? $this->criteria->sum('max_score')
+            : $this->criteria()->sum('max_score'));
     }
 
     /**

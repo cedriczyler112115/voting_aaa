@@ -109,11 +109,16 @@ class VotingEventController extends Controller
                 $q->withCount(['nominees', 'votes'])
                     ->orderBy('display_order')
                     ->orderBy('id')
-                    ->with(['nominees' => function ($nq) {
-                        $nq->withCount('votes')
-                            ->orderBy('display_order')
-                            ->orderBy('id');
-                    }]);
+                    ->with([
+                        'criteria' => function ($cq) {
+                            $cq->orderBy('display_order')->orderBy('id');
+                        },
+                        'nominees' => function ($nq) {
+                            $nq->withCount('votes')
+                                ->orderBy('display_order')
+                                ->orderBy('id');
+                        },
+                    ]);
             },
             'creator',
         ]);
@@ -188,6 +193,15 @@ class VotingEventController extends Controller
                     'display_order' => $award->display_order,
                     'nominees_count' => $award->nominees_count,
                     'votes_count' => $award->votes_count,
+                    'total_criteria_score' => (float) $award->criteria->sum('max_score'),
+                    'criteria' => $award->criteria->map(fn (VotingCriterion $c) => [
+                        'id' => $c->id,
+                        'voting_award_id' => $c->voting_award_id,
+                        'name' => $c->name,
+                        'description' => $c->description,
+                        'max_score' => (float) $c->max_score,
+                        'display_order' => $c->display_order,
+                    ]),
                     'nominees' => $award->nominees->map(fn (VotingNominee $nominee) => [
                         'id' => $nominee->id,
                         'name' => $nominee->name,

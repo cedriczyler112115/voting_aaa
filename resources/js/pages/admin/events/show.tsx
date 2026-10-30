@@ -11,6 +11,7 @@ import {
     ChevronRight,
     ChevronsLeft,
     ChevronsRight,
+    Copy,
     Edit3,
     ExternalLink,
     MapPin,
@@ -20,7 +21,6 @@ import {
     ShieldAlert,
     ShieldCheck,
     Sliders,
-    Sparkles,
     Trash2,
     User,
     UserCheck,
@@ -28,7 +28,7 @@ import {
     UserX,
     X,
 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useMemo, useRef, useState } from 'react';
 import AppLayout from '@/layouts/app-layout';
 
 type NomineeItem = {
@@ -56,6 +56,8 @@ type AwardItem = {
     display_order: number;
     nominees_count: number;
     votes_count: number;
+    criteria?: CriterionItem[];
+    total_criteria_score?: number;
     nominees: NomineeItem[];
 };
 
@@ -117,8 +119,9 @@ type Props = {
 };
 
 export default function EventShow({ event, all_users = [] }: Props) {
-    const { flash } = usePage<{
+    const { flash, errors } = usePage<{
         flash?: { success?: string; error?: string };
+        errors: Record<string, string>;
     }>().props;
 
     // Modals
@@ -156,6 +159,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
     });
 
     // Nominee Form
+    const fileInputRef = useRef<HTMLInputElement | null>(null);
     const [nomineeForm, setNomineeForm] = useState<{
         name: string;
         description: string;
@@ -180,6 +184,61 @@ export default function EventShow({ event, all_users = [] }: Props) {
 
     const [processing, setProcessing] = useState(false);
 
+    const closeNomineeModal = () => {
+        setAddingNomineeAward(null);
+        setEditingNominee(null);
+        setNomineeForm({
+            name: '',
+            description: '',
+            department: '',
+            organization: '',
+            status: 'active',
+            display_order: 0,
+            photo: null,
+            photo_preview: null,
+            remove_photo: false,
+        });
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+    };
+
+    const openAddNomineeModal = (award: AwardItem) => {
+        setNomineeForm({
+            name: '',
+            description: '',
+            department: '',
+            organization: '',
+            status: 'active',
+            display_order: award.nominees.length + 1,
+            photo: null,
+            photo_preview: null,
+            remove_photo: false,
+        });
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+        setAddingNomineeAward(award);
+    };
+
+    const openEditNomineeModal = (nominee: NomineeItem) => {
+        setNomineeForm({
+            name: nominee.name,
+            description: nominee.description || '',
+            department: nominee.department || '',
+            organization: nominee.organization || '',
+            status: nominee.status,
+            display_order: nominee.display_order,
+            photo: null,
+            photo_preview: nominee.photo_path || null,
+            remove_photo: false,
+        });
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
+        setEditingNominee(nominee);
+    };
+
     const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (file) {
@@ -190,9 +249,13 @@ export default function EventShow({ event, all_users = [] }: Props) {
                 remove_photo: false,
             }));
         }
+        e.target.value = '';
     };
 
     const handleRemoveNomineePhoto = () => {
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
         setNomineeForm((prev) => ({
             ...prev,
             photo: null,
@@ -264,32 +327,24 @@ export default function EventShow({ event, all_users = [] }: Props) {
         e.preventDefault();
         if (!addingNomineeAward) return;
         setProcessing(true);
+
+        const formData = new FormData();
+        formData.append('name', nomineeForm.name);
+        formData.append('description', nomineeForm.description || '');
+        formData.append('department', nomineeForm.department || '');
+        formData.append('organization', nomineeForm.organization || '');
+        formData.append('status', nomineeForm.status);
+        formData.append('display_order', String(nomineeForm.display_order));
+        if (nomineeForm.photo) {
+            formData.append('photo', nomineeForm.photo);
+        }
+
         router.post(
             `/admin/awards/${addingNomineeAward.id}/nominees`,
+            formData,
             {
-                name: nomineeForm.name,
-                description: nomineeForm.description,
-                department: nomineeForm.department,
-                organization: nomineeForm.organization,
-                status: nomineeForm.status,
-                display_order: nomineeForm.display_order,
-                photo: nomineeForm.photo,
-            },
-            {
-                forceFormData: true,
                 onSuccess: () => {
-                    setAddingNomineeAward(null);
-                    setNomineeForm({
-                        name: '',
-                        description: '',
-                        department: '',
-                        organization: '',
-                        status: 'active',
-                        display_order: 0,
-                        photo: null,
-                        photo_preview: null,
-                        remove_photo: false,
-                    });
+                    closeNomineeModal();
                 },
                 onFinish: () => setProcessing(false),
             },
@@ -301,22 +356,29 @@ export default function EventShow({ event, all_users = [] }: Props) {
         e.preventDefault();
         if (!editingNominee) return;
         setProcessing(true);
+
+        const formData = new FormData();
+        formData.append('_method', 'put');
+        formData.append('name', nomineeForm.name);
+        formData.append('description', nomineeForm.description || '');
+        formData.append('department', nomineeForm.department || '');
+        formData.append('organization', nomineeForm.organization || '');
+        formData.append('status', nomineeForm.status);
+        formData.append('display_order', String(nomineeForm.display_order));
+        if (nomineeForm.photo) {
+            formData.append('photo', nomineeForm.photo);
+        }
+        if (nomineeForm.remove_photo) {
+            formData.append('remove_photo', '1');
+        }
+
         router.post(
             `/admin/nominees/${editingNominee.id}`,
+            formData,
             {
-                _method: 'put',
-                name: nomineeForm.name,
-                description: nomineeForm.description,
-                department: nomineeForm.department,
-                organization: nomineeForm.organization,
-                status: nomineeForm.status,
-                display_order: nomineeForm.display_order,
-                photo: nomineeForm.photo,
-                remove_photo: nomineeForm.remove_photo ? '1' : '0',
-            },
-            {
-                forceFormData: true,
-                onSuccess: () => setEditingNominee(null),
+                onSuccess: () => {
+                    closeNomineeModal();
+                },
                 onFinish: () => setProcessing(false),
             },
         );
@@ -333,30 +395,44 @@ export default function EventShow({ event, all_users = [] }: Props) {
         router.delete(`/admin/nominees/${nominee.id}`);
     };
 
-    // Active Tab: 'awards' | 'criteria' | 'voters'
-    const [activeTab, setActiveTab] = useState<'awards' | 'criteria' | 'voters'>('awards');
+    // Active Tab: 'awards' | 'voters'
+    const [activeTab, setActiveTab] = useState<'awards' | 'voters'>('awards');
 
-    // Criteria Management State
+    // Criteria Management State per Award Category
+    const [addingCriterionAward, setAddingCriterionAward] = useState<AwardItem | null>(null);
     const [isAddCriterionOpen, setIsAddCriterionOpen] = useState(false);
     const [editingCriterion, setEditingCriterion] = useState<CriterionItem | null>(null);
     const [criterionForm, setCriterionForm] = useState({
         name: '',
         description: '',
         max_score: 20,
-        display_order: (event.criteria?.length || 0) + 1,
+        display_order: 1,
     });
+
+    const openAddCriterionModal = (award: AwardItem) => {
+        setAddingCriterionAward(award);
+        setCriterionForm({
+            name: '',
+            description: '',
+            max_score: 20,
+            display_order: (award.criteria?.length || 0) + 1,
+        });
+        setIsAddCriterionOpen(true);
+    };
 
     const handleAddCriterion = (e: FormEvent) => {
         e.preventDefault();
+        if (!addingCriterionAward) return;
         setProcessing(true);
-        router.post(`/admin/events/${event.id}/criteria`, criterionForm, {
+        router.post(`/admin/awards/${addingCriterionAward.id}/criteria`, criterionForm, {
             onSuccess: () => {
                 setIsAddCriterionOpen(false);
+                setAddingCriterionAward(null);
                 setCriterionForm({
                     name: '',
                     description: '',
                     max_score: 20,
-                    display_order: (event.criteria?.length || 0) + 2,
+                    display_order: 1,
                 });
             },
             onFinish: () => setProcessing(false),
@@ -368,7 +444,10 @@ export default function EventShow({ event, all_users = [] }: Props) {
         if (!editingCriterion) return;
         setProcessing(true);
         router.put(`/admin/criteria/${editingCriterion.id}`, criterionForm, {
-            onSuccess: () => setEditingCriterion(null),
+            onSuccess: () => {
+                setEditingCriterion(null);
+                setAddingCriterionAward(null);
+            },
             onFinish: () => setProcessing(false),
         });
     };
@@ -378,9 +457,9 @@ export default function EventShow({ event, all_users = [] }: Props) {
         router.delete(`/admin/criteria/${criterion.id}`);
     };
 
-    const handleLoadDefaultCriteria = () => {
-        if (!confirm('Load the 5 standard ANINAG criteria totaling 100%?')) return;
-        router.post(`/admin/events/${event.id}/criteria/defaults`);
+    const handleCopyCriteriaToAll = (award: AwardItem) => {
+        if (!confirm(`Copy all criteria from "${award.name}" to all other award categories in this event? This will overwrite existing criteria in the other categories.`)) return;
+        router.post(`/admin/awards/${award.id}/criteria/copy-to-all`);
     };
 
     // Voter List Management State
@@ -691,27 +770,6 @@ export default function EventShow({ event, all_users = [] }: Props) {
                     </button>
                     <button
                         type="button"
-                        onClick={() => setActiveTab('criteria')}
-                        className={`inline-flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
-                            activeTab === 'criteria'
-                                ? 'border-primary text-primary'
-                                : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground'
-                        }`}
-                    >
-                        <Sliders className="h-4 w-4" />
-                        <span>Evaluation Criteria</span>
-                        <span
-                            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                                (event.total_criteria_score ?? 0) === 100
-                                    ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                                    : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                            }`}
-                        >
-                            {event.total_criteria_score ?? 0}% / 100%
-                        </span>
-                    </button>
-                    <button
-                        type="button"
                         onClick={() => setActiveTab('voters')}
                         className={`inline-flex items-center gap-2 border-b-2 px-5 py-3 text-sm font-semibold transition-colors ${
                             activeTab === 'voters'
@@ -819,6 +877,17 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                                             {award.votes_count}{' '}
                                                             Votes Recorded
                                                         </span>
+                                                        <span>•</span>
+                                                        <span
+                                                            className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                                                                (award.total_criteria_score ?? 0) === 100
+                                                                    ? 'bg-emerald-500/10 text-emerald-600'
+                                                                    : 'bg-amber-500/10 text-amber-600'
+                                                            }`}
+                                                        >
+                                                            <Sliders className="h-3 w-3" />
+                                                            Criteria: {award.criteria?.length || 0} ({award.total_criteria_score || 0}%)
+                                                        </span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -827,24 +896,17 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                             <div className="flex items-center gap-2">
                                                 <button
                                                     type="button"
-                                                    onClick={() => {
-                                                        setNomineeForm({
-                                                            name: '',
-                                                            description: '',
-                                                            department: '',
-                                                            organization: '',
-                                                            status: 'active',
-                                                            display_order:
-                                                                award.nominees
-                                                                    .length + 1,
-                                                            photo: null,
-                                                            photo_preview: null,
-                                                            remove_photo: false,
-                                                        });
-                                                        setAddingNomineeAward(
-                                                            award,
-                                                        );
-                                                    }}
+                                                    onClick={() => openAddCriterionModal(award)}
+                                                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+                                                    title="Add evaluation criterion to this award category"
+                                                >
+                                                    <Sliders className="h-3.5 w-3.5 text-primary" />
+                                                    Add Criterion
+                                                </button>
+
+                                                <button
+                                                    type="button"
+                                                    onClick={() => openAddNomineeModal(award)}
                                                     className="inline-flex items-center gap-1.5 rounded-lg bg-muted px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted/80"
                                                 >
                                                     <Plus className="h-3.5 w-3.5" />
@@ -893,9 +955,11 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                         </div>
 
                                         {/* Nominees Grid */}
-                                        <div className="mt-5">
-                                            <div className="mb-3 text-xs font-semibold tracking-wider text-muted-foreground uppercase">
-                                                Nominees under this Award:
+                                        <div className="mt-4">
+                                            <div className="mb-2.5 flex items-center justify-between">
+                                                <div className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">
+                                                    Nominees under this Award ({award.nominees.length}):
+                                                </div>
                                             </div>
 
                                             {award.nominees.length === 0 ? (
@@ -905,302 +969,246 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                                     candidates.
                                                 </div>
                                             ) : (
-                                                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                                                    {award.nominees.map(
-                                                        (nominee) => (
-                                                            <div
-                                                                key={nominee.id}
-                                                                className="flex items-start justify-between gap-3 rounded-xl border border-border/70 bg-card p-3.5 transition-colors hover:border-border"
-                                                            >
-                                                                <div className="flex items-start gap-3.5">
-                                                                    <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-muted shadow-sm">
-                                                                        {nominee.photo_path ? (
-                                                                            <img
-                                                                                src={
-                                                                                    nominee.photo_path
-                                                                                }
-                                                                                alt={
+                                                <div className="overflow-x-auto pb-1">
+                                                    <div className="grid grid-cols-5 gap-2.5 min-w-[620px] lg:min-w-0">
+                                                        {award.nominees.map(
+                                                            (nominee) => (
+                                                                <div
+                                                                    key={nominee.id}
+                                                                    className="group flex flex-col justify-between overflow-hidden rounded-xl border border-border/70 bg-card transition-all hover:border-border hover:shadow-xs"
+                                                                >
+                                                                    <div>
+                                                                        {/* Photo Container */}
+                                                                        <div className="relative aspect-[4/3] w-full overflow-hidden bg-muted">
+                                                                            {nominee.photo_path ? (
+                                                                                <img
+                                                                                    src={
+                                                                                        nominee.photo_path
+                                                                                    }
+                                                                                    alt={
+                                                                                        nominee.name
+                                                                                    }
+                                                                                    className="h-full w-full object-cover"
+                                                                                />
+                                                                            ) : (
+                                                                                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-muted/50 to-muted text-muted-foreground/40">
+                                                                                    <User className="h-8 w-8" />
+                                                                                </div>
+                                                                            )}
+
+                                                                            {/* Status indicator on top-left */}
+                                                                            <div className="absolute top-1.5 left-1.5">
+                                                                                <span
+                                                                                    className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-bold shadow-xs backdrop-blur-xs ${
+                                                                                        nominee.status ===
+                                                                                        'active'
+                                                                                            ? 'bg-emerald-500/90 text-white'
+                                                                                            : 'bg-neutral-800/90 text-neutral-200'
+                                                                                    }`}
+                                                                                >
+                                                                                    {nominee.status ===
+                                                                                    'active'
+                                                                                        ? 'Active'
+                                                                                        : 'Inactive'}
+                                                                                </span>
+                                                                            </div>
+
+                                                                            {/* Transfer the edit and delete button in the bottom of the picture/photo */}
+                                                                            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-1 bg-gradient-to-t from-black/85 via-black/55 to-transparent p-1.5 pt-4">
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() => openEditNomineeModal(nominee)}
+                                                                                    className="inline-flex items-center gap-1 rounded bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white shadow-xs backdrop-blur-xs transition-colors hover:bg-white/35 active:scale-95"
+                                                                                    title="Edit nominee"
+                                                                                >
+                                                                                    <Edit3 className="h-3 w-3" />
+                                                                                    <span>Edit</span>
+                                                                                </button>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={() =>
+                                                                                        handleDeleteNominee(
+                                                                                            nominee,
+                                                                                        )
+                                                                                    }
+                                                                                    className="inline-flex items-center gap-1 rounded bg-red-600/85 px-2 py-0.5 text-[10px] font-semibold text-white shadow-xs backdrop-blur-xs transition-colors hover:bg-red-600 active:scale-95"
+                                                                                    title="Delete nominee"
+                                                                                >
+                                                                                    <Trash2 className="h-3 w-3" />
+                                                                                    <span>Delete</span>
+                                                                                </button>
+                                                                            </div>
+                                                                        </div>
+
+                                                                        {/* Data Information Section - covers the full width of the card */}
+                                                                        <div className="flex flex-col gap-1 p-2.5">
+                                                                            <div
+                                                                                className="text-xs font-bold leading-tight text-foreground break-words"
+                                                                                title={
                                                                                     nominee.name
                                                                                 }
-                                                                                className="h-full w-full object-cover"
-                                                                            />
-                                                                        ) : (
-                                                                            <User className="h-8 w-8 text-muted-foreground/50" />
-                                                                        )}
+                                                                            >
+                                                                                {
+                                                                                    nominee.name
+                                                                                }
+                                                                            </div>
+
+                                                                            {nominee.department && (
+                                                                                <div
+                                                                                    className="flex items-start gap-1 text-[11px] leading-tight text-muted-foreground"
+                                                                                    title={`Designation: ${nominee.department}`}
+                                                                                >
+                                                                                    <Briefcase className="mt-0.5 h-3 w-3 shrink-0 text-primary/70" />
+                                                                                    <span className="break-words">
+                                                                                        {
+                                                                                            nominee.department
+                                                                                        }
+                                                                                    </span>
+                                                                                </div>
+                                                                            )}
+
+                                                                            {nominee.organization && (
+                                                                                <div
+                                                                                    className="flex items-start gap-1 text-[11px] leading-tight text-muted-foreground"
+                                                                                    title={`Area of Assignment: ${nominee.organization}`}
+                                                                                >
+                                                                                    <MapPin className="mt-0.5 h-3 w-3 shrink-0 text-primary/70" />
+                                                                                    <span className="break-words">
+                                                                                        {
+                                                                                            nominee.organization
+                                                                                        }
+                                                                                    </span>
+                                                                                </div>
+                                                                            )}
+                                                                        </div>
                                                                     </div>
-                                                                    <div className="min-w-0 flex-1">
-                                                                        <div className="truncate text-sm font-bold text-foreground">
-                                                                            {
-                                                                                nominee.name
-                                                                            }
+
+                                                                    {/* Card Footer with Votes Cast */}
+                                                                    <div className="border-t border-border/40 bg-muted/20 px-2.5 py-1.5 text-[10px] font-semibold text-primary">
+                                                                        {nominee.votes_count}{' '}
+                                                                        {nominee.votes_count === 1 ? 'vote' : 'votes'} cast
+                                                                    </div>
+                                                                </div>
+                                                            ),
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Evaluation Criteria for this Award */}
+                                        <div className="mt-6 border-t border-border/60 pt-5">
+                                            <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                                <div className="flex flex-wrap items-center gap-2">
+                                                    <div className="flex items-center gap-1.5 text-xs font-bold text-foreground">
+                                                        <Sliders className="h-4 w-4 text-primary" />
+                                                        <span>Evaluation Criteria ({award.criteria?.length || 0})</span>
+                                                    </div>
+                                                    <span
+                                                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                                            (award.total_criteria_score ?? 0) === 100
+                                                                ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
+                                                                : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                                                        }`}
+                                                    >
+                                                        {(award.total_criteria_score ?? 0) === 100
+                                                            ? '100% Valid Rubric'
+                                                            : `Weight Total: ${award.total_criteria_score ?? 0}% (Must equal 100%)`}
+                                                    </span>
+                                                </div>
+
+                                                <div className="flex items-center gap-2">
+                                                    {award.criteria && award.criteria.length > 0 && event.awards.length > 1 && (
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => handleCopyCriteriaToAll(award)}
+                                                            className="inline-flex items-center gap-1 rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-muted"
+                                                            title="Copy criteria from this award to all other award categories"
+                                                        >
+                                                            <Copy className="h-3 w-3 text-muted-foreground" />
+                                                            Copy to All
+                                                        </button>
+                                                    )}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openAddCriterionModal(award)}
+                                                        className="inline-flex items-center gap-1 rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90"
+                                                    >
+                                                        <Plus className="h-3.5 w-3.5" />
+                                                        Add Criterion
+                                                    </button>
+                                                </div>
+                                            </div>
+
+                                            {(!award.criteria || award.criteria.length === 0) ? (
+                                                <div className="rounded-xl border border-dashed border-border/80 bg-muted/20 p-5 text-center text-xs text-muted-foreground">
+                                                    No evaluation criteria configured for this award category yet. Click <span className="font-semibold text-foreground">"Add Criterion"</span> above to build the 100% scoring rubric.
+                                                </div>
+                                            ) : (
+                                                <div className="overflow-hidden rounded-xl border border-border/70 bg-card">
+                                                    <div className="divide-y divide-border/60">
+                                                        {award.criteria.map((criterion, idx) => (
+                                                            <div
+                                                                key={criterion.id}
+                                                                className="flex flex-col gap-2 p-3.5 transition-colors hover:bg-muted/20 sm:flex-row sm:items-center sm:justify-between"
+                                                            >
+                                                                <div className="flex items-start gap-3">
+                                                                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-muted text-[11px] font-bold text-foreground">
+                                                                        {criterion.display_order || idx + 1}
+                                                                    </span>
+                                                                    <div className="min-w-0">
+                                                                        <div className="text-xs font-bold text-foreground">
+                                                                            {criterion.name}
                                                                         </div>
-                                                                        {nominee.department && (
-                                                                            <div
-                                                                                className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"
-                                                                                title={`Designation: ${nominee.department}`}
-                                                                            >
-                                                                                <Briefcase className="h-3 w-3 shrink-0 text-primary/70" />
-                                                                                <span className="truncate">
-                                                                                    {
-                                                                                        nominee.department
-                                                                                    }
-                                                                                </span>
-                                                                            </div>
+                                                                        {criterion.description && (
+                                                                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                                                                {criterion.description}
+                                                                            </p>
                                                                         )}
-                                                                        {nominee.organization && (
-                                                                            <div
-                                                                                className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground"
-                                                                                title={`Area of Assignment: ${nominee.organization}`}
-                                                                            >
-                                                                                <MapPin className="h-3 w-3 shrink-0 text-primary/70" />
-                                                                                <span className="truncate">
-                                                                                    {
-                                                                                        nominee.organization
-                                                                                    }
-                                                                                </span>
-                                                                            </div>
-                                                                        )}
-                                                                        <div className="mt-1.5 text-[11px] font-semibold text-primary">
-                                                                            {
-                                                                                nominee.votes_count
-                                                                            }{' '}
-                                                                            votes
-                                                                            cast
-                                                                        </div>
                                                                     </div>
                                                                 </div>
 
-                                                                {/* Nominee Actions */}
-                                                                <div className="flex items-center gap-1">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => {
-                                                                            setNomineeForm(
-                                                                                {
-                                                                                    name: nominee.name,
-                                                                                    description:
-                                                                                        nominee.description ||
-                                                                                        '',
-                                                                                    department:
-                                                                                        nominee.department ||
-                                                                                        '',
-                                                                                    organization:
-                                                                                        nominee.organization ||
-                                                                                        '',
-                                                                                    status: nominee.status,
-                                                                                    display_order:
-                                                                                        nominee.display_order,
-                                                                                    photo: null,
-                                                                                    photo_preview:
-                                                                                        nominee.photo_path ||
-                                                                                        null,
-                                                                                    remove_photo: false,
-                                                                                },
-                                                                            );
-                                                                            setEditingNominee(
-                                                                                nominee,
-                                                                            );
-                                                                        }}
-                                                                        className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                                                                        title="Edit nominee"
-                                                                    >
-                                                                        <Edit3 className="h-3 w-3" />
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() =>
-                                                                            handleDeleteNominee(
-                                                                                nominee,
-                                                                            )
-                                                                        }
-                                                                        className="rounded p-1 text-red-500 hover:bg-red-500/10"
-                                                                        title="Delete nominee"
-                                                                    >
-                                                                        <Trash2 className="h-3 w-3" />
-                                                                    </button>
+                                                                <div className="flex items-center justify-between gap-3 pl-9 sm:justify-end sm:pl-0">
+                                                                    <span className="rounded-md border border-border/80 bg-muted/40 px-2.5 py-1 font-mono text-xs font-bold text-foreground">
+                                                                        {criterion.max_score} pts ({criterion.max_score}%)
+                                                                    </span>
+
+                                                                    <div className="flex items-center gap-1">
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setEditingCriterion(criterion);
+                                                                                setAddingCriterionAward(award);
+                                                                                setCriterionForm({
+                                                                                    name: criterion.name,
+                                                                                    description: criterion.description || '',
+                                                                                    max_score: criterion.max_score,
+                                                                                    display_order: criterion.display_order,
+                                                                                });
+                                                                            }}
+                                                                            className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                                                            title="Edit criterion"
+                                                                        >
+                                                                            <Edit3 className="h-3.5 w-3.5" />
+                                                                        </button>
+                                                                        <button
+                                                                            type="button"
+                                                                            onClick={() => handleDeleteCriterion(criterion)}
+                                                                            className="rounded p-1 text-red-500 hover:bg-red-500/10"
+                                                                            title="Delete criterion"
+                                                                        >
+                                                                            <Trash2 className="h-3.5 w-3.5" />
+                                                                        </button>
+                                                                    </div>
                                                                 </div>
                                                             </div>
-                                                        ),
-                                                    )}
+                                                        ))}
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
                                     </div>
                                 ))}
-                            </div>
-                        )}
-                    </div>
-                ) : activeTab === 'criteria' ? (
-                    /* Dynamic Evaluation Criteria Manager */
-                    <div className="flex flex-col gap-6">
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                                <h2 className="text-xl font-bold tracking-tight text-foreground">
-                                    Evaluation Criteria ({event.criteria?.length || 0})
-                                </h2>
-                                <p className="mt-0.5 text-xs text-muted-foreground">
-                                    Define the weighted criteria used by voters to evaluate nominees. The total maximum score across all criteria must sum up to exactly 100%.
-                                </p>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2">
-                                {(!event.criteria || event.criteria.length === 0) && (
-                                    <button
-                                        type="button"
-                                        onClick={handleLoadDefaultCriteria}
-                                        className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-3.5 py-2 text-xs font-semibold text-primary shadow-sm transition-colors hover:bg-primary/20"
-                                        title="Load 5 standard ANINAG criteria totaling 100%"
-                                    >
-                                        <Sparkles className="h-3.5 w-3.5" />
-                                        Load Sample ANINAG Criteria
-                                    </button>
-                                )}
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setCriterionForm({
-                                            name: '',
-                                            description: '',
-                                            max_score: 20,
-                                            display_order: (event.criteria?.length || 0) + 1,
-                                        });
-                                        setIsAddCriterionOpen(true);
-                                    }}
-                                    className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-4 py-2 text-xs font-semibold text-primary-foreground shadow-sm transition-colors hover:bg-primary/90"
-                                >
-                                    <Plus className="h-4 w-4" />
-                                    Add Criterion
-                                </button>
-                            </div>
-                        </div>
-
-                        {/* Weight Summary Banner */}
-                        <div
-                            className={`flex flex-col gap-3 rounded-2xl border p-5 sm:flex-row sm:items-center sm:justify-between ${
-                                (event.total_criteria_score ?? 0) === 100
-                                    ? 'border-emerald-500/30 bg-emerald-500/5'
-                                    : 'border-amber-500/30 bg-amber-500/5'
-                            }`}
-                        >
-                            <div className="flex items-start gap-3">
-                                {(event.total_criteria_score ?? 0) === 100 ? (
-                                    <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                                ) : (
-                                    <AlertCircle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
-                                )}
-                                <div>
-                                    <p className="text-sm font-bold text-foreground">
-                                        {(event.total_criteria_score ?? 0) === 100
-                                            ? 'Criteria Formulation Valid (100% Total Score)'
-                                            : `Criteria Total Score is ${event.total_criteria_score ?? 0}% (Must equal 100%)`}
-                                    </p>
-                                    <p className="mt-0.5 text-xs text-muted-foreground">
-                                        {(event.total_criteria_score ?? 0) === 100
-                                            ? 'Nominee ratings will be calculated based on this 100% matrix, with a 50% Section Heads average and 50% Division Chief weighted formula.'
-                                            : `Please adjust criteria maximum scores so that the combined total equals exactly 100% (currently ${event.total_criteria_score ?? 0}%).`}
-                                    </p>
-                                </div>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-3">
-                                <div className="text-right">
-                                    <div className="text-xs font-medium text-muted-foreground">Total Max Weight</div>
-                                    <div
-                                        className={`text-2xl font-black ${
-                                            (event.total_criteria_score ?? 0) === 100
-                                                ? 'text-emerald-600 dark:text-emerald-400'
-                                                : 'text-amber-600 dark:text-amber-400'
-                                        }`}
-                                    >
-                                        {event.total_criteria_score ?? 0}%
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-
-                        {/* Criteria List */}
-                        {(!event.criteria || event.criteria.length === 0) ? (
-                            <div className="rounded-2xl border border-dashed border-border bg-card p-12 text-center">
-                                <Sliders className="mx-auto h-10 w-10 text-muted-foreground/60" />
-                                <h3 className="mt-3 text-base font-semibold text-foreground">
-                                    No Evaluation Criteria Defined
-                                </h3>
-                                <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-                                    Add dynamic criteria to build the 100% evaluation rubric for this voting event, or load standard criteria with one click.
-                                </p>
-                                <div className="mt-5 flex justify-center gap-3">
-                                    <button
-                                        type="button"
-                                        onClick={handleLoadDefaultCriteria}
-                                        className="inline-flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/10 px-4 py-2 text-xs font-semibold text-primary transition-colors hover:bg-primary/20"
-                                    >
-                                        <Sparkles className="h-3.5 w-3.5" />
-                                        Load Sample ANINAG Criteria (100%)
-                                    </button>
-                                </div>
-                            </div>
-                        ) : (
-                            <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-                                <div className="divide-y divide-border/60">
-                                    {event.criteria.map((criterion, idx) => (
-                                        <div
-                                            key={criterion.id}
-                                            className="flex flex-col gap-3 p-4 transition-colors hover:bg-muted/30 sm:flex-row sm:items-center sm:justify-between"
-                                        >
-                                            <div className="flex items-start gap-3">
-                                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-xs font-bold text-foreground">
-                                                    {criterion.display_order || idx + 1}
-                                                </div>
-                                                <div>
-                                                    <h4 className="text-sm font-bold text-foreground">
-                                                        {criterion.name}
-                                                    </h4>
-                                                    {criterion.description && (
-                                                        <p className="mt-0.5 text-xs text-muted-foreground">
-                                                            {criterion.description}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            <div className="flex items-center justify-between gap-4 sm:justify-end">
-                                                <div className="rounded-xl border border-border/80 bg-muted/50 px-3.5 py-1.5 text-center">
-                                                    <span className="text-[10px] font-semibold text-muted-foreground uppercase">
-                                                        Max Score / Weight
-                                                    </span>
-                                                    <div className="text-sm font-black text-foreground">
-                                                        {criterion.max_score} pts ({criterion.max_score}%)
-                                                    </div>
-                                                </div>
-
-                                                <div className="flex items-center gap-1">
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => {
-                                                            setEditingCriterion(criterion);
-                                                            setCriterionForm({
-                                                                name: criterion.name,
-                                                                description: criterion.description || '',
-                                                                max_score: criterion.max_score,
-                                                                display_order: criterion.display_order,
-                                                            });
-                                                        }}
-                                                        className="rounded-lg border border-border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                                                        title="Edit criterion"
-                                                    >
-                                                        <Edit3 className="h-4 w-4" />
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        onClick={() => handleDeleteCriterion(criterion)}
-                                                        className="rounded-lg border border-red-500/20 bg-red-500/5 p-2 text-red-600 transition-colors hover:bg-red-500/10"
-                                                        title="Delete criterion"
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
                             </div>
                         )}
                     </div>
@@ -1811,15 +1819,22 @@ export default function EventShow({ event, all_users = [] }: Props) {
                             </h2>
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setAddingNomineeAward(null);
-                                    setEditingNominee(null);
-                                }}
+                                onClick={closeNomineeModal}
                                 className="rounded-md p-1 text-muted-foreground hover:bg-muted"
                             >
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
+
+                        {errors && Object.keys(errors).length > 0 && (
+                            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-400">
+                                <ul className="list-inside list-disc space-y-0.5">
+                                    {Object.entries(errors).map(([key, err]) => (
+                                        <li key={key}>{err}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
 
                         <form
                             onSubmit={
@@ -1856,6 +1871,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                                         : 'Upload Photo'}
                                                 </span>
                                                 <input
+                                                    ref={fileInputRef}
                                                     type="file"
                                                     accept="image/png,image/jpeg,image/jpg,image/webp"
                                                     className="hidden"
@@ -1879,6 +1895,11 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                             PNG, JPG, or WEBP up to 5MB. Square
                                             photo recommended.
                                         </p>
+                                        {errors?.photo && (
+                                            <p className="text-xs font-semibold text-red-500">
+                                                {errors.photo}
+                                            </p>
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -2004,10 +2025,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
                             <div className="mt-6 flex items-center justify-end gap-3 border-t border-border/70 pt-4">
                                 <button
                                     type="button"
-                                    onClick={() => {
-                                        setAddingNomineeAward(null);
-                                        setEditingNominee(null);
-                                    }}
+                                    onClick={closeNomineeModal}
                                     className="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted"
                                 >
                                     Cancel
@@ -2400,13 +2418,16 @@ export default function EventShow({ event, all_users = [] }: Props) {
                     <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl">
                         <div className="flex items-center justify-between border-b border-border/70 pb-4">
                             <h2 className="text-lg font-bold text-foreground">
-                                {editingCriterion ? 'Edit Evaluation Criterion' : 'Add Evaluation Criterion'}
+                                {editingCriterion
+                                    ? 'Edit Evaluation Criterion'
+                                    : `Add Evaluation Criterion for "${addingCriterionAward?.name}"`}
                             </h2>
                             <button
                                 type="button"
                                 onClick={() => {
                                     setIsAddCriterionOpen(false);
                                     setEditingCriterion(null);
+                                    setAddingCriterionAward(null);
                                 }}
                                 className="rounded-lg p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
                             >
@@ -2503,6 +2524,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                     onClick={() => {
                                         setIsAddCriterionOpen(false);
                                         setEditingCriterion(null);
+                                        setAddingCriterionAward(null);
                                     }}
                                     className="rounded-lg border border-border px-4 py-2 text-xs font-semibold text-foreground hover:bg-muted"
                                 >

@@ -28,7 +28,7 @@ class VotingNomineeController extends Controller
         if ($request->hasFile('photo')) {
             $file = $request->file('photo');
             if ($file && ($path = $file->store('nominees', 'public'))) {
-                $validated['photo_path'] = Storage::url($path);
+                $validated['photo_path'] = '/storage/'.$path;
             }
         }
 
@@ -62,19 +62,13 @@ class VotingNomineeController extends Controller
         ]);
 
         if ($request->boolean('remove_photo')) {
-            if ($nominee->photo_path && str_starts_with($nominee->photo_path, '/storage/nominees/')) {
-                $oldPath = str_replace('/storage/', '', $nominee->photo_path);
-                Storage::disk('public')->delete($oldPath);
-            }
+            $this->deleteNomineePhotoFile($nominee->photo_path);
             $validated['photo_path'] = null;
         } elseif ($request->hasFile('photo')) {
-            if ($nominee->photo_path && str_starts_with($nominee->photo_path, '/storage/nominees/')) {
-                $oldPath = str_replace('/storage/', '', $nominee->photo_path);
-                Storage::disk('public')->delete($oldPath);
-            }
+            $this->deleteNomineePhotoFile($nominee->photo_path);
             $file = $request->file('photo');
             if ($file && ($path = $file->store('nominees', 'public'))) {
-                $validated['photo_path'] = Storage::url($path);
+                $validated['photo_path'] = '/storage/'.$path;
             }
         }
 
@@ -102,10 +96,7 @@ class VotingNomineeController extends Controller
             return back()->with('error', "Cannot delete nominee '{$nominee->name}' because {$votesCount} vote(s) have been cast for them. You can deactivate them instead.");
         }
 
-        if ($nominee->photo_path && str_starts_with($nominee->photo_path, '/storage/nominees/')) {
-            $oldPath = str_replace('/storage/', '', $nominee->photo_path);
-            Storage::disk('public')->delete($oldPath);
-        }
+        $this->deleteNomineePhotoFile($nominee->photo_path);
 
         $name = $nominee->name;
         $nominee->delete();
@@ -117,5 +108,19 @@ class VotingNomineeController extends Controller
         );
 
         return back()->with('success', "Nominee '{$name}' was successfully deleted.");
+    }
+
+    private function deleteNomineePhotoFile(?string $photoPath): void
+    {
+        if (! $photoPath) {
+            return;
+        }
+
+        $relativePath = preg_replace('#^https?://[^/]+/storage/#', '', $photoPath);
+        $relativePath = preg_replace('#^/storage/#', '', $relativePath);
+
+        if ($relativePath && Storage::disk('public')->exists($relativePath)) {
+            Storage::disk('public')->delete($relativePath);
+        }
     }
 }

@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\VotingAuditLog;
+use App\Models\VotingAward;
 use App\Models\VotingCriterion;
 use App\Models\VotingEvent;
 use Illuminate\Http\RedirectResponse;
@@ -12,9 +13,9 @@ use Illuminate\Http\Request;
 class VotingCriterionController extends Controller
 {
     /**
-     * Store a newly created criterion for an event.
+     * Store a newly created criterion for an award category.
      */
-    public function store(Request $request, VotingEvent $event): RedirectResponse
+    public function store(Request $request, VotingAward $award): RedirectResponse
     {
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
@@ -23,19 +24,20 @@ class VotingCriterionController extends Controller
             'display_order' => ['nullable', 'integer', 'min:0'],
         ]);
 
-        $validated['display_order'] = $validated['display_order'] ?? ($event->criteria()->count() + 1);
+        $validated['display_order'] = $validated['display_order'] ?? ($award->criteria()->count() + 1);
+        $validated['voting_event_id'] = $award->voting_event_id;
 
-        $criterion = $event->criteria()->create($validated);
+        $criterion = $award->criteria()->create($validated);
 
         VotingAuditLog::log(
             action: 'criterion.created',
-            description: "Added criterion [{$criterion->name}] with max score [{$criterion->max_score}] to event [{$event->title}]",
-            auditable: $event,
+            description: "Added criterion [{$criterion->name}] with max score [{$criterion->max_score}] to award [{$award->name}]",
+            auditable: $award,
             newValues: $criterion->toArray()
         );
 
-        $totalScore = $event->criteria()->sum('max_score');
-        $msg = "Criterion '{$criterion->name}' added successfully. Current total weight: {$totalScore}%.";
+        $totalScore = $award->criteria()->sum('max_score');
+        $msg = "Criterion '{$criterion->name}' added successfully to '{$award->name}'. Current total weight: {$totalScore}%.";
 
         return back()->with('success', $msg);
     }
@@ -55,15 +57,17 @@ class VotingCriterionController extends Controller
         $oldValues = $criterion->toArray();
         $criterion->update($validated);
 
+        $award = $criterion->award;
+
         VotingAuditLog::log(
             action: 'criterion.updated',
-            description: "Updated criterion [{$criterion->name}] in event [{$criterion->event->title}]",
-            auditable: $criterion->event,
+            description: "Updated criterion [{$criterion->name}] in award [" . ($award?->name ?? 'Unknown') . "]",
+            auditable: $award ?? $criterion->event,
             oldValues: $oldValues,
             newValues: $criterion->toArray()
         );
 
-        $totalScore = $criterion->event->criteria()->sum('max_score');
+        $totalScore = $award ? $award->criteria()->sum('max_score') : 0;
 
         return back()->with('success', "Criterion updated successfully. Current total weight: {$totalScore}%.");
     }
@@ -73,70 +77,65 @@ class VotingCriterionController extends Controller
      */
     public function destroy(VotingCriterion $criterion): RedirectResponse
     {
-        $event = $criterion->event;
+        $award = $criterion->award;
         $name = $criterion->name;
 
         $criterion->delete();
 
         VotingAuditLog::log(
             action: 'criterion.deleted',
-            description: "Deleted criterion [{$name}] from event [{$event->title}]",
-            auditable: $event
+            description: "Deleted criterion [{$name}] from award [" . ($award?->name ?? 'Unknown') . "]",
+            auditable: $award ?? $criterion->event
         );
 
-        $totalScore = $event->criteria()->sum('max_score');
+        $totalScore = $award ? $award->criteria()->sum('max_score') : 0;
 
         return back()->with('success', "Criterion '{$name}' deleted. Current total weight: {$totalScore}%.");
     }
 
     /**
-     * Quick-load standard ANINAG sample evaluation criteria totaling 100%.
+     * Copy criteria from this award to all other awards in the same event.
      */
-    public function loadDefaults(VotingEvent $event): RedirectResponse
+    public function copyToAll(VotingAward $award): RedirectResponse
     {
-        $defaultCriteria = [
-            [
-                'name' => 'Exemplary Work Performance',
-                'description' => 'Quality, consistency, and dedication to duty and responsibilities.',
-                'max_score' => 40,
-                'display_order' => 1,
-            ],
-            [
-                'name' => 'Commendable and Unique Contributions',
-                'description' => 'Significant innovations, problem-solving, and beyond-call initiatives.',
-                'max_score' => 20,
-                'display_order' => 2,
-            ],
-            [
-                'name' => 'Leadership and Staff Engagement',
-                'description' => 'Team mentorship, positive influence, and motivating peers.',
-                'max_score' => 20,
-                'display_order' => 3,
-            ],
-            [
-                'name' => 'Stakeholder Coordination and Partnership Building',
-                'description' => 'Collaborative engagement with partners, beneficiaries, and stakeholders.',
-                'max_score' => 10,
-                'display_order' => 4,
-            ],
-            [
-                'name' => 'Commitment to Learning and Integrity in Public Service',
-                'description' => 'Ethics, professionalism, and continuous self-improvement.',
-                'max_score' => 10,
-                'display_order' => 5,
-            ],
-        ];
+        $criteria = $award->criteria;
 
-        foreach ($defaultCriteria as $item) {
-            $event->criteria()->create($item);
+        if ($criteria->isEmpty()) {
+            return back()->with('error', "The award '{$award->name}' has no criteria to copy.");
+        }
+
+        $otherAwards = VotingAward::query()
+            ->where('voting_event_id', $award->voting_event_id)
+            ->where('id', '!=', $award->id)
+            ->get();
+
+        if ($otherAwards->isEmpty()) {
+            return back()->with('error', 'There are no other awards in this event to copy criteria to.');
+        }
+
+        $copiedCount = 0;
+        foreach ($otherAwards as $targetAward) {
+            // Delete existing criteria for target award to avoid duplicates
+            $targetAward->criteria()->delete();
+
+            foreach ($criteria as $crit) {
+                $targetAward->criteria()->create([
+                    'voting_event_id' => $targetAward->voting_event_id,
+                    'name' => $crit->name,
+                    'description' => $crit->description,
+                    'max_score' => $crit->max_score,
+                    'display_order' => $crit->display_order,
+                ]);
+            }
+            $copiedCount++;
         }
 
         VotingAuditLog::log(
-            action: 'criterion.defaults_loaded',
-            description: "Loaded 5 standard evaluation criteria totaling 100% for event [{$event->title}]",
-            auditable: $event
+            action: 'criterion.copied_to_all',
+            description: "Copied criteria from award [{$award->name}] to {$copiedCount} other awards in event [{$award->event->title}]",
+            auditable: $award
         );
 
-        return back()->with('success', '5 standard criteria totaling 100% have been loaded successfully.');
+        return back()->with('success', "Criteria copied from '{$award->name}' to all {$copiedCount} other awards in this event.");
     }
 }

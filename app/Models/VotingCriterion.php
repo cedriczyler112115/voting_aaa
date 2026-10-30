@@ -10,14 +10,16 @@ use Illuminate\Support\Carbon;
 
 /**
  * @property int $id
- * @property int $voting_event_id
+ * @property int|null $voting_event_id
+ * @property int|null $voting_award_id
  * @property string $name
  * @property string|null $description
  * @property float $max_score
  * @property int $display_order
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
- * @property-read VotingEvent $event
+ * @property-read VotingAward|null $award
+ * @property-read VotingEvent|null $event
  * @property-read Collection<int, VotingVoteScore> $scores
  */
 class VotingCriterion extends Model
@@ -26,6 +28,7 @@ class VotingCriterion extends Model
 
     protected $fillable = [
         'voting_event_id',
+        'voting_award_id',
         'name',
         'description',
         'max_score',
@@ -38,6 +41,14 @@ class VotingCriterion extends Model
             'max_score' => 'float',
             'display_order' => 'integer',
         ];
+    }
+
+    /**
+     * @return BelongsTo<VotingAward, $this>
+     */
+    public function award(): BelongsTo
+    {
+        return $this->belongsTo(VotingAward::class, 'voting_award_id');
     }
 
     /**

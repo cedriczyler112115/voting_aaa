@@ -178,15 +178,16 @@ export default function VotingShow({
     }, [unvoted_voters, voterSearch]);
 
     const getAwardCriteria = (award?: AwardItem | null): CriterionItem[] => {
-        if (!award) return event.criteria || [];
-        if (award.criteria && award.criteria.length > 0) return award.criteria;
-        return event.criteria || [];
+        if (!award) return [];
+        return award.criteria || [];
     };
 
     const getAwardTotalCriteriaScore = (award?: AwardItem | null): number => {
-        if (!award) return event.total_criteria_score || 100;
-        if (award.total_criteria_score && award.total_criteria_score > 0) return award.total_criteria_score;
-        return event.total_criteria_score || 100;
+        if (!award) return 0;
+        if (award.total_criteria_score !== undefined && award.total_criteria_score > 0) {
+            return award.total_criteria_score;
+        }
+        return (award.criteria || []).reduce((acc, c) => acc + (c.max_score || 0), 0);
     };
 
     // Open criteria scoring modal for a specific nominee
@@ -562,6 +563,8 @@ export default function VotingShow({
                                     ) : (
                                         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
                                             {activeNominees.map((nominee) => {
+                                                const awardCriteriaList = getAwardCriteria(award);
+                                                const hasCriteria = awardCriteriaList.length > 0;
                                                 const isScored = isNomineeComplete(award, nominee.id);
                                                 const nomineeTotal = getNomineeTotal(award.id, nominee.id);
                                                 const awardMaxScore = getAwardTotalCriteriaScore(award);
@@ -688,16 +691,22 @@ export default function VotingShow({
                                                         <div className="border-t border-border/60 bg-muted/20 p-3">
                                                             <button
                                                                 type="button"
-                                                                disabled={!canChange}
+                                                                disabled={!canChange || !hasCriteria}
                                                                 onClick={() => handleOpenScoringModal(award, nominee)}
                                                                 className={`w-full inline-flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold shadow-2xs transition-colors ${
-                                                                    isScored
+                                                                    !hasCriteria
+                                                                        ? 'border border-border bg-muted/50 text-muted-foreground cursor-not-allowed opacity-60'
+                                                                        : isScored
                                                                         ? 'border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20'
                                                                         : 'bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50'
                                                                 }`}
                                                             >
                                                                 <Sliders className="h-3.5 w-3.5" />
-                                                                {isScored ? 'Edit Criteria Scores' : 'Score Criteria'}
+                                                                {!hasCriteria
+                                                                    ? 'No Criteria Configured'
+                                                                    : isScored
+                                                                    ? 'Edit Criteria Scores'
+                                                                    : 'Score Criteria'}
                                                             </button>
                                                         </div>
                                                     </div>
@@ -760,66 +769,77 @@ export default function VotingShow({
                                 Rate this nominee for each criterion from 0 up to its maximum score for the <span className="font-semibold text-foreground">"{scoringModal?.award.name}"</span> category. When saved, the score is saved directly to the database.
                             </p>
 
-                            {getAwardCriteria(scoringModal?.award).map((criterion, idx) => {
-                                const currentVal = modalCriterionScores[criterion.id] ?? '';
-                                const numVal = parseFloat(currentVal || '0') || 0;
-                                const isOver = numVal > criterion.max_score;
+                            {getAwardCriteria(scoringModal?.award).length === 0 ? (
+                                <div className="rounded-xl border border-dashed border-amber-500/40 bg-amber-500/5 p-6 text-center">
+                                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                                        No evaluation criteria configured for the "{scoringModal?.award.name}" category yet.
+                                    </p>
+                                    <p className="mt-1 text-xs text-muted-foreground">
+                                        Please contact the administrator to set up criteria for this award category.
+                                    </p>
+                                </div>
+                            ) : (
+                                getAwardCriteria(scoringModal?.award).map((criterion, idx) => {
+                                    const currentVal = modalCriterionScores[criterion.id] ?? '';
+                                    const numVal = parseFloat(currentVal || '0') || 0;
+                                    const isOver = numVal > criterion.max_score;
 
-                                return (
-                                    <div
-                                        key={criterion.id}
-                                        className={`flex flex-col gap-2 rounded-xl border p-3.5 sm:flex-row sm:items-center sm:justify-between ${
-                                            isOver
-                                                ? 'border-red-500/50 bg-red-500/5'
-                                                : 'border-border/70 bg-background/50'
-                                        }`}
-                                    >
-                                        <div className="min-w-0 flex-1">
-                                            <div className="flex items-center gap-2">
-                                                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
-                                                    {idx + 1}
-                                                </span>
-                                                <span className="text-xs font-bold text-foreground">
-                                                    {criterion.name}
+                                    return (
+                                        <div
+                                            key={criterion.id}
+                                            className={`flex flex-col gap-2 rounded-xl border p-3.5 sm:flex-row sm:items-center sm:justify-between ${
+                                                isOver
+                                                    ? 'border-red-500/50 bg-red-500/5'
+                                                    : 'border-border/70 bg-background/50'
+                                            }`}
+                                        >
+                                            <div className="min-w-0 flex-1">
+                                                <div className="flex items-center gap-2">
+                                                    <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
+                                                        {idx + 1}
+                                                    </span>
+                                                    <span className="text-xs font-bold text-foreground">
+                                                        {criterion.name}
+                                                    </span>
+                                                </div>
+                                                {criterion.description && (
+                                                    <p className="mt-1 pl-7 text-[11px] text-muted-foreground">
+                                                        {criterion.description}
+                                                    </p>
+                                                )}
+                                            </div>
+
+                                            <div className="flex items-center gap-2 pl-7 sm:pl-0">
+                                                <div className="relative">
+                                                    <input
+                                                        type="number"
+                                                        min={0}
+                                                        max={criterion.max_score}
+                                                        step={0.5}
+                                                        placeholder="0"
+                                                        value={currentVal}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            setModalCriterionScores((prev) => ({
+                                                                ...prev,
+                                                                [criterion.id]: val,
+                                                            }));
+                                                        }}
+                                                        className={`w-24 rounded-lg border bg-card px-2.5 py-1.5 text-center text-sm font-bold text-foreground focus:ring-2 focus:ring-primary/20 focus:outline-none ${
+                                                            isOver
+                                                                ? 'border-red-500 text-red-600'
+                                                                : 'border-border focus:border-primary'
+                                                        }`}
+                                                    />
+                                                </div>
+                                                <span className="text-xs font-bold text-muted-foreground shrink-0">
+                                                    / {criterion.max_score} pts
                                                 </span>
                                             </div>
-                                            {criterion.description && (
-                                                <p className="mt-1 pl-7 text-[11px] text-muted-foreground">
-                                                    {criterion.description}
-                                                </p>
-                                            )}
                                         </div>
-
-                                        <div className="flex items-center gap-2 pl-7 sm:pl-0">
-                                            <div className="relative">
-                                                <input
-                                                    type="number"
-                                                    min={0}
-                                                    max={criterion.max_score}
-                                                    step={0.5}
-                                                    placeholder="0"
-                                                    value={currentVal}
-                                                    onChange={(e) => {
-                                                        const val = e.target.value;
-                                                        setModalCriterionScores((prev) => ({
-                                                            ...prev,
-                                                            [criterion.id]: val,
-                                                        }));
-                                                    }}
-                                                    className={`w-24 rounded-lg border bg-card px-2.5 py-1.5 text-center text-sm font-bold text-foreground focus:ring-2 focus:ring-primary/20 focus:outline-none ${
-                                                        isOver
-                                                            ? 'border-red-500 text-red-600'
-                                                            : 'border-border focus:border-primary'
-                                                    }`}
-                                                />
-                                            </div>
-                                            <span className="text-xs font-bold text-muted-foreground shrink-0">
-                                                / {criterion.max_score} pts
-                                            </span>
-                                        </div>
-                                    </div>
-                                );
-                            })}
+                                    );
+                                })
+                            )}
                         </div>
 
                         {/* Modal Live Summary */}
@@ -876,7 +896,7 @@ export default function VotingShow({
                                         </button>
                                         <button
                                             type="button"
-                                            disabled={hasErrors || savingNominee}
+                                            disabled={modalCriteria.length === 0 || hasErrors || savingNominee}
                                             onClick={handleSaveModalScores}
                                             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50"
                                         >

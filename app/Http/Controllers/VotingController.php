@@ -122,9 +122,6 @@ class VotingController extends Controller
 
         $event = VotingEvent::query()
             ->with([
-                'criteria' => function ($cQuery) {
-                    $cQuery->orderBy('display_order')->orderBy('id');
-                },
                 'awards' => function ($query) {
                     $query->where('status', 'active')
                         ->orderBy('display_order')
@@ -172,7 +169,7 @@ class VotingController extends Controller
             $scoredCount = count($awardUserVotes);
             $hasVoted = $nomineesCount > 0 && $scoredCount >= $nomineesCount;
 
-            $awardCriteria = $award->criteria->isNotEmpty() ? $award->criteria : $event->criteria;
+            $awardCriteria = $award->criteria;
 
             return [
                 'id' => $award->id,
@@ -264,14 +261,8 @@ class VotingController extends Controller
                 'progress_percentage' => $totalAwards > 0 ? round(($completedAwards / $totalAwards) * 100) : 0,
                 'total_authorized_voters' => $totalAuthorizedCount,
                 'staff_voted_count' => $staffVotedCount,
-                'criteria' => $event->criteria->map(fn (VotingCriterion $c) => [
-                    'id' => $c->id,
-                    'name' => $c->name,
-                    'description' => $c->description,
-                    'max_score' => (float) $c->max_score,
-                    'display_order' => $c->display_order,
-                ]),
-                'total_criteria_score' => (float) $event->criteria->sum('max_score'),
+                'criteria' => [],
+                'total_criteria_score' => 0,
             ],
             'unvoted_voters' => $unvotedVoters,
             'awards' => $awards,
@@ -296,9 +287,6 @@ class VotingController extends Controller
                 'criteria' => function ($q) {
                     $q->orderBy('display_order')->orderBy('id');
                 },
-                'event.criteria' => function ($q) {
-                    $q->orderBy('display_order')->orderBy('id');
-                },
                 'nominees' => function ($q) {
                     $q->where('status', 'active');
                 },
@@ -307,7 +295,7 @@ class VotingController extends Controller
             ->firstOrFail();
 
         $event = $award->event;
-        $criteria = $award->criteria->isNotEmpty() ? $award->criteria : $event->criteria;
+        $criteria = $award->criteria;
 
         $nominee = $award->nominees->firstWhere('id', $validated['voting_nominee_id']);
         if (! $nominee) {
@@ -432,9 +420,6 @@ class VotingController extends Controller
                 'criteria' => function ($q) {
                     $q->orderBy('display_order')->orderBy('id');
                 },
-                'event.criteria' => function ($q) {
-                    $q->orderBy('display_order')->orderBy('id');
-                },
                 'nominees' => function ($q) {
                     $q->where('status', 'active');
                 },
@@ -443,7 +428,7 @@ class VotingController extends Controller
             ->firstOrFail();
 
         $event = $award->event;
-        $criteria = $award->criteria->isNotEmpty() ? $award->criteria : $event->criteria;
+        $criteria = $award->criteria;
         $activeNominees = $award->nominees;
         $nomineesCount = $activeNominees->count();
 
@@ -875,7 +860,6 @@ class VotingController extends Controller
 
         $award->load([
             'criteria' => fn ($q) => $q->orderBy('display_order')->orderBy('id'),
-            'event.criteria' => fn ($q) => $q->orderBy('display_order')->orderBy('id'),
             'nominees.votes.voter',
             'nominees.votes.scores.criterion',
             'votes.voter',
@@ -886,7 +870,7 @@ class VotingController extends Controller
         $isRevealDateReached = $event->isRevealDateReached();
         $shouldRevealNominee = $canReveal || $isRevealDateReached;
 
-        $criteria = $award->criteria->isNotEmpty() ? $award->criteria : $event->criteria;
+        $criteria = $award->criteria;
         $totalCriteriaScore = $criteria->sum('max_score') ?: 100;
 
         // Get ranked nominees using the standard 50% DC + 50% SH formula

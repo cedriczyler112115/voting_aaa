@@ -28,7 +28,8 @@ import {
     UserX,
     X,
 } from 'lucide-react';
-import { FormEvent, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { toast } from 'sonner';
 import AppLayout from '@/layouts/app-layout';
 
 type NomineeItem = {
@@ -123,6 +124,18 @@ export default function EventShow({ event, all_users = [] }: Props) {
         flash?: { success?: string; error?: string };
         errors: Record<string, string>;
     }>().props;
+
+    // Notifications Toast Effect
+    const lastFlashRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (flash?.success && lastFlashRef.current !== flash.success) {
+            toast.success(flash.success);
+            lastFlashRef.current = flash.success;
+        } else if (flash?.error && lastFlashRef.current !== flash.error) {
+            toast.error(flash.error);
+            lastFlashRef.current = flash.error;
+        }
+    }, [flash]);
 
     // Modals
     const [isEditEventOpen, setIsEditEventOpen] = useState(false);
@@ -269,6 +282,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
         e.preventDefault();
         setProcessing(true);
         router.put(`/admin/events/${event.id}`, eventForm, {
+            preserveScroll: true,
             onSuccess: () => setIsEditEventOpen(false),
             onFinish: () => setProcessing(false),
         });
@@ -276,7 +290,11 @@ export default function EventShow({ event, all_users = [] }: Props) {
 
     // Quick Status Change
     const handleQuickStatusChange = (newStatus: string) => {
-        router.post(`/admin/events/${event.id}/status`, { status: newStatus });
+        router.post(
+            `/admin/events/${event.id}/status`,
+            { status: newStatus },
+            { preserveScroll: true },
+        );
     };
 
     // Add Award Submit
@@ -284,6 +302,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
         e.preventDefault();
         setProcessing(true);
         router.post(`/admin/events/${event.id}/awards`, awardForm, {
+            preserveScroll: true,
             onSuccess: () => {
                 setIsAddAwardOpen(false);
                 setAwardForm({
@@ -306,6 +325,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
         if (!editingAward) return;
         setProcessing(true);
         router.put(`/admin/awards/${editingAward.id}`, awardForm, {
+            preserveScroll: true,
             onSuccess: () => setEditingAward(null),
             onFinish: () => setProcessing(false),
         });
@@ -319,7 +339,9 @@ export default function EventShow({ event, all_users = [] }: Props) {
             )
         )
             return;
-        router.delete(`/admin/awards/${award.id}`);
+        router.delete(`/admin/awards/${award.id}`, {
+            preserveScroll: true,
+        });
     };
 
     // Add Nominee Submit
@@ -343,6 +365,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
             `/admin/awards/${addingNomineeAward.id}/nominees`,
             formData,
             {
+                preserveScroll: true,
                 onSuccess: () => {
                     closeNomineeModal();
                 },
@@ -376,6 +399,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
             `/admin/nominees/${editingNominee.id}`,
             formData,
             {
+                preserveScroll: true,
                 onSuccess: () => {
                     closeNomineeModal();
                 },
@@ -392,7 +416,9 @@ export default function EventShow({ event, all_users = [] }: Props) {
             )
         )
             return;
-        router.delete(`/admin/nominees/${nominee.id}`);
+        router.delete(`/admin/nominees/${nominee.id}`, {
+            preserveScroll: true,
+        });
     };
 
     // Active Tab: 'awards' | 'voters'
@@ -425,6 +451,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
         if (!addingCriterionAward) return;
         setProcessing(true);
         router.post(`/admin/awards/${addingCriterionAward.id}/criteria`, criterionForm, {
+            preserveScroll: true,
             onSuccess: () => {
                 setIsAddCriterionOpen(false);
                 setAddingCriterionAward(null);
@@ -444,6 +471,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
         if (!editingCriterion) return;
         setProcessing(true);
         router.put(`/admin/criteria/${editingCriterion.id}`, criterionForm, {
+            preserveScroll: true,
             onSuccess: () => {
                 setEditingCriterion(null);
                 setAddingCriterionAward(null);
@@ -454,12 +482,18 @@ export default function EventShow({ event, all_users = [] }: Props) {
 
     const handleDeleteCriterion = (criterion: CriterionItem) => {
         if (!confirm(`Are you sure you want to delete criterion "${criterion.name}"?`)) return;
-        router.delete(`/admin/criteria/${criterion.id}`);
+        router.delete(`/admin/criteria/${criterion.id}`, {
+            preserveScroll: true,
+        });
     };
 
     const handleCopyCriteriaToAll = (award: AwardItem) => {
         if (!confirm(`Copy all criteria from "${award.name}" to all other award categories in this event? This will overwrite existing criteria in the other categories.`)) return;
-        router.post(`/admin/awards/${award.id}/criteria/copy-to-all`);
+        router.post(
+            `/admin/awards/${award.id}/criteria/copy-to-all`,
+            {},
+            { preserveScroll: true },
+        );
     };
 
     // Voter List Management State
@@ -479,6 +513,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
             `/admin/events/${event.id}/voters`,
             { user_ids: selectedUserIds },
             {
+                preserveScroll: true,
                 onSuccess: () => {
                     setIsAddVotersOpen(false);
                     setSelectedUserIds([]);
@@ -498,7 +533,9 @@ export default function EventShow({ event, all_users = [] }: Props) {
         ) {
             return;
         }
-        router.delete(`/admin/events/${event.id}/voters/${voter.user_id}`);
+        router.delete(`/admin/events/${event.id}/voters/${voter.user_id}`, {
+            preserveScroll: true,
+        });
     };
 
     const handleAllowAllVoters = () => {
@@ -509,7 +546,11 @@ export default function EventShow({ event, all_users = [] }: Props) {
         ) {
             return;
         }
-        router.post(`/admin/events/${event.id}/voters/allow-all`);
+        router.post(
+            `/admin/events/${event.id}/voters/allow-all`,
+            {},
+            { preserveScroll: true },
+        );
     };
 
     const handleClearVoters = () => {
@@ -520,7 +561,11 @@ export default function EventShow({ event, all_users = [] }: Props) {
         ) {
             return;
         }
-        router.post(`/admin/events/${event.id}/voters/clear`);
+        router.post(
+            `/admin/events/${event.id}/voters/clear`,
+            {},
+            { preserveScroll: true },
+        );
     };
 
     const alreadyEnrolledUserIds = useMemo(() => {
@@ -1455,6 +1500,16 @@ export default function EventShow({ event, all_users = [] }: Props) {
                             </button>
                         </div>
 
+                        {errors && Object.keys(errors).length > 0 && (
+                            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-400">
+                                <ul className="list-inside list-disc space-y-0.5">
+                                    {Object.entries(errors).map(([key, err]) => (
+                                        <li key={key}>{err}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+
                         <form
                             onSubmit={handleUpdateEvent}
                             className="mt-5 space-y-4"
@@ -1691,6 +1746,16 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
+
+                        {errors && Object.keys(errors).length > 0 && (
+                            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-400">
+                                <ul className="list-inside list-disc space-y-0.5">
+                                    {Object.entries(errors).map(([key, err]) => (
+                                        <li key={key}>{err}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
 
                         <form
                             onSubmit={
@@ -2434,6 +2499,16 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                 <X className="h-5 w-5" />
                             </button>
                         </div>
+
+                        {errors && Object.keys(errors).length > 0 && (
+                            <div className="mt-4 rounded-xl border border-red-500/20 bg-red-500/10 p-3 text-xs text-red-600 dark:text-red-400">
+                                <ul className="list-inside list-disc space-y-0.5">
+                                    {Object.entries(errors).map(([key, err]) => (
+                                        <li key={key}>{err}</li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
 
                         <form
                             onSubmit={editingCriterion ? handleUpdateCriterion : handleAddCriterion}

@@ -19,10 +19,10 @@
 .phpunit.result.cache
 Homestead.json
 Homestead.yaml
-npm-debug.log
+npm-debug.log1
 yarn-error.log
 /auth.json
-/.fleet
+/.fleet1
 /.idea
 /.nova
 /.vscode

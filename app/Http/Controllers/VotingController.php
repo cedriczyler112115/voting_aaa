@@ -856,7 +856,7 @@ class VotingController extends Controller
     public function tabulationBreakdown(Request $request, VotingAward $award): Response
     {
         $user = $request->user();
-        $canReveal = $user && ($user->isAdmin() || (int) $user->id === 2);
+        $isAdminOrChief = $user && ($user->isAdmin() || (int) $user->id === 2);
 
         $award->load([
             'criteria' => fn ($q) => $q->orderBy('display_order')->orderBy('id'),
@@ -868,7 +868,8 @@ class VotingController extends Controller
 
         $event = $award->event;
         $isRevealDateReached = $event->isRevealDateReached();
-        $shouldRevealNominee = $canReveal || $isRevealDateReached;
+        $canViewScores = $isAdminOrChief || $isRevealDateReached;
+        $shouldRevealNominee = $canViewScores;
 
         $criteria = $award->criteria;
         $totalCriteriaScore = $criteria->sum('max_score') ?: 100;
@@ -911,72 +912,78 @@ class VotingController extends Controller
         // 1. Division Chief (voter_id = 2) scores per nominee & criteria
         $dcUser = User::find(2);
         $dcNomineeScores = [];
-        foreach ($award->nominees as $nominee) {
-            $dcVote = $nominee->votes->firstWhere('voter_id', 2);
-            $criteriaMap = [];
-            if ($dcVote) {
-                foreach ($dcVote->scores as $scoreItem) {
-                    $criteriaMap[$scoreItem->voting_criterion_id] = (float) $scoreItem->score;
+        if ($canViewScores) {
+            foreach ($award->nominees as $nominee) {
+                $dcVote = $nominee->votes->firstWhere('voter_id', 2);
+                $criteriaMap = [];
+                if ($dcVote) {
+                    foreach ($dcVote->scores as $scoreItem) {
+                        $criteriaMap[$scoreItem->voting_criterion_id] = (float) $scoreItem->score;
+                    }
                 }
+                $dcNomineeScores[$nominee->id] = [
+                    'has_voted' => $dcVote !== null,
+                    'score' => $dcVote ? (float) $dcVote->score : null,
+                    'weighted_score' => $dcVote ? round((float) $dcVote->score * 0.50, 2) : 0.0,
+                    'criteria_scores' => $criteriaMap,
+                ];
             }
-            $dcNomineeScores[$nominee->id] = [
-                'has_voted' => $dcVote !== null,
-                'score' => $dcVote ? (float) $dcVote->score : null,
-                'weighted_score' => $dcVote ? round((float) $dcVote->score * 0.50, 2) : 0.0,
-                'criteria_scores' => $criteriaMap,
-            ];
         }
 
         // 2. Section Heads (voters with voter_id != 2)
-        $shVotesGroupedByVoter = $award->votes
-            ->where('voter_id', '!=', 2)
-            ->groupBy('voter_id');
-
         $sectionHeadsList = [];
-        $shIndex = 1;
+        if ($canViewScores) {
+            $shVotesGroupedByVoter = $award->votes
+                ->where('voter_id', '!=', 2)
+                ->groupBy('voter_id');
 
-        foreach ($shVotesGroupedByVoter as $voterId => $voterVotes) {
-            $firstVote = $voterVotes->first();
-            $voter = $firstVote?->voter ?? User::find($voterId);
+            $shIndex = 1;
 
-            $nomineeScores = [];
-            foreach ($award->nominees as $nominee) {
-                $nVote = $voterVotes->firstWhere('voting_nominee_id', $nominee->id);
-                $critScores = [];
-                if ($nVote) {
-                    foreach ($nVote->scores as $sc) {
-                        $critScores[$sc->voting_criterion_id] = (float) $sc->score;
+            foreach ($shVotesGroupedByVoter as $voterId => $voterVotes) {
+                $firstVote = $voterVotes->first();
+                $voter = $firstVote?->voter ?? User::find($voterId);
+
+                $nomineeScores = [];
+                foreach ($award->nominees as $nominee) {
+                    $nVote = $voterVotes->firstWhere('voting_nominee_id', $nominee->id);
+                    $critScores = [];
+                    if ($nVote) {
+                        foreach ($nVote->scores as $sc) {
+                            $critScores[$sc->voting_criterion_id] = (float) $sc->score;
+                        }
                     }
+                    $nomineeScores[$nominee->id] = [
+                        'has_voted' => $nVote !== null,
+                        'score' => $nVote ? (float) $nVote->score : null,
+                        'criteria_scores' => $critScores,
+                    ];
                 }
-                $nomineeScores[$nominee->id] = [
-                    'has_voted' => $nVote !== null,
-                    'score' => $nVote ? (float) $nVote->score : null,
-                    'criteria_scores' => $critScores,
+
+                $sectionHeadsList[] = [
+                    'voter_id' => $voterId,
+                    'display_number' => $shIndex++,
+                    'name' => $voter?->display_name ?? ('Voter #' . ($shIndex - 1)),
+                    'email' => $voter?->email,
+                    'designation' => $voter?->designation ?: ($voter?->position ?: null),
+                    'section' => $voter?->section ?: ($voter?->division ?: null),
+                    'department' => $voter?->section ?: ($voter?->division ?: ($voter?->department ?? null)),
+                    'scores' => $nomineeScores,
                 ];
             }
-
-            $sectionHeadsList[] = [
-                'voter_id' => $voterId,
-                'display_number' => $shIndex++,
-                'name' => $voter?->display_name ?? ('Voter #' . ($shIndex - 1)),
-                'email' => $voter?->email,
-                'designation' => $voter?->designation ?: ($voter?->position ?: null),
-                'section' => $voter?->section ?: ($voter?->division ?: null),
-                'department' => $voter?->section ?: ($voter?->division ?: ($voter?->department ?? null)),
-                'scores' => $nomineeScores,
-            ];
         }
 
         // Summary row for Section Heads matrix:
         $shSummary = [];
-        foreach ($nomineesList as $nominee) {
-            $nId = $nominee['id'];
-            $shSummary[$nId] = [
-                'total_score' => $nominee['sh_total_formatted'],
-                'voters_count' => $nominee['sh_count'],
-                'average_score' => $nominee['sh_average_formatted'],
-                'weighted_score' => $nominee['sh_weighted_score_formatted'],
-            ];
+        if ($canViewScores) {
+            foreach ($nomineesList as $nominee) {
+                $nId = $nominee['id'];
+                $shSummary[$nId] = [
+                    'total_score' => $nominee['sh_total_formatted'],
+                    'voters_count' => $nominee['sh_count'],
+                    'average_score' => $nominee['sh_average_formatted'],
+                    'weighted_score' => $nominee['sh_weighted_score_formatted'],
+                ];
+            }
         }
 
         return Inertia::render('voting/tabulation-breakdown', [
@@ -1013,8 +1020,9 @@ class VotingController extends Controller
             ],
             'section_heads' => $sectionHeadsList,
             'section_heads_summary' => $shSummary,
-            'can_reveal' => $canReveal || $isRevealDateReached,
-            'is_reveal_date_reached' => $isRevealDateReached,
+            'can_reveal' => (bool) $isAdminOrChief,
+            'can_view_scores' => (bool) $canViewScores,
+            'is_reveal_date_reached' => (bool) $isRevealDateReached,
         ]);
     }
 }

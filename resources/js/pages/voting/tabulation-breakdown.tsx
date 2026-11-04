@@ -120,8 +120,9 @@ type Props = {
             weighted_score: string;
         }
     >;
-    can_reveal: boolean;
-    is_reveal_date_reached: boolean;
+    can_reveal?: boolean;
+    can_view_scores?: boolean;
+    is_reveal_date_reached?: boolean;
 };
 
 export default function TabulationBreakdown({
@@ -133,10 +134,13 @@ export default function TabulationBreakdown({
     division_chief,
     section_heads,
     section_heads_summary,
-    can_reveal,
+    can_reveal = false,
+    can_view_scores,
     is_reveal_date_reached = false,
 }: Props) {
     const [showCriteriaBreakdown, setShowCriteriaBreakdown] = useState(false);
+
+    const canViewScores = Boolean(can_view_scores ?? (can_reveal || is_reveal_date_reached));
 
     const formatRevealDate = (dateStr?: string | null) => {
         if (!dateStr) return null;
@@ -445,15 +449,23 @@ export default function TabulationBreakdown({
                         </div>
 
                         <div className="flex items-center gap-2">
-                            {is_reveal_date_reached ? (
-                                <button
-                                    type="button"
-                                    onClick={() => setShowCriteriaBreakdown((prev) => !prev)}
-                                    className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
-                                >
-                                    <Info className="h-3.5 w-3.5 text-primary" />
-                                    {showCriteriaBreakdown ? 'Hide Criteria Sub-Scores' : 'View Criteria Sub-Scores'}
-                                </button>
+                            {canViewScores ? (
+                                <>
+                                    {!is_reveal_date_reached && can_reveal && (
+                                        <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+                                            <Shield className="h-3 w-3" />
+                                            Admin / DC View
+                                        </span>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowCriteriaBreakdown((prev) => !prev)}
+                                        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted"
+                                    >
+                                        <Info className="h-3.5 w-3.5 text-primary" />
+                                        {showCriteriaBreakdown ? 'Hide Criteria Sub-Scores' : 'View Criteria Sub-Scores'}
+                                    </button>
+                                </>
                             ) : (
                                 <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
                                     <Lock className="h-3.5 w-3.5" />
@@ -463,7 +475,7 @@ export default function TabulationBreakdown({
                         </div>
                     </div>
 
-                    {!is_reveal_date_reached ? (
+                    {!canViewScores ? (
                         <div className="flex flex-col items-center justify-center p-8 sm:p-12 text-center bg-muted/5">
                             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 shadow-sm mb-3.5">
                                 <Lock className="h-6 w-6" />
@@ -641,7 +653,13 @@ export default function TabulationBreakdown({
                             <span className="rounded-full bg-emerald-500/10 px-3 py-1 font-mono text-xs font-bold text-emerald-700 dark:text-emerald-300">
                                 50% Weight Share
                             </span>
-                            {!is_reveal_date_reached && (
+                            {!is_reveal_date_reached && can_reveal && (
+                                <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
+                                    <Shield className="h-3 w-3" />
+                                    Admin / DC View
+                                </span>
+                            )}
+                            {!canViewScores && (
                                 <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/30 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
                                     <Lock className="h-3.5 w-3.5" />
                                     Scores Sealed
@@ -650,7 +668,7 @@ export default function TabulationBreakdown({
                         </div>
                     </div>
 
-                    {!is_reveal_date_reached ? (
+                    {!canViewScores ? (
                         <div className="flex flex-col items-center justify-center p-8 sm:p-12 text-center bg-muted/5">
                             <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 shadow-sm mb-3.5">
                                 <Lock className="h-6 w-6" />

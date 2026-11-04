@@ -38,6 +38,7 @@ Route::middleware(['auth'])->group(function () {
     Route::post('/voting/vote', [VotingController::class, 'castVote'])->name('voting.vote');
     Route::get('/voting/{slug}/results', [VotingController::class, 'results'])->name('voting.results');
     Route::get('/tabulation-results', [VotingController::class, 'tabulationResults'])->name('voting.tabulation');
+    Route::get('/tabulation-results/export', [VotingController::class, 'exportTabulation'])->name('voting.tabulation.export');
     Route::get('/tabulation-results/breakdown/{award}', [VotingController::class, 'tabulationBreakdown'])->name('voting.tabulation-breakdown');
     Route::get('/voting-history', [VotingController::class, 'history'])->name('voting.history');
 });

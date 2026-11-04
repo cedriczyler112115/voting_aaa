@@ -15,6 +15,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Inertia\Inertia;
 use Inertia\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class VotingController extends Controller
 {
@@ -848,6 +849,233 @@ class VotingController extends Controller
             'can_reveal' => $canReveal || $isRevealDateReached,
             'is_reveal_date_reached' => $isRevealDateReached,
         ]);
+    }
+
+    /**
+     * Download / export filtered event tabulation results and category winners to Excel/CSV.
+     */
+    public function exportTabulation(Request $request): StreamedResponse
+    {
+        $user = $request->user();
+        $selectedEventId = $request->input('event_id', $request->input('event'));
+
+        $event = null;
+        if ($selectedEventId) {
+            $event = is_numeric($selectedEventId)
+                ? VotingEvent::find($selectedEventId)
+                : VotingEvent::where('slug', $selectedEventId)->first();
+        }
+
+        if (! $event) {
+            $event = VotingEvent::query()
+                ->whereIn('status', ['published', 'scheduled', 'closed', 'archived'])
+                ->orderByDesc('id')
+                ->firstOrFail();
+        }
+
+        if (! $event->canViewResults($user)) {
+            abort(403, 'You are not authorized to view or download results for this event.');
+        }
+
+        $canReveal = $user && ($user->isAdmin() || (int) $user->id === 2);
+        $isRevealDateReached = $event->isRevealDateReached();
+        $shouldRevealNominee = $canReveal || $isRevealDateReached;
+
+        $type = $request->input('type', 'all'); // 'all', 'winners', 'results'
+
+        VotingAuditLog::log(
+            action: 'tabulation.exported',
+            description: "Exported tabulation [type: {$type}] for event [{$event->title}] to Excel/CSV",
+            auditable: $event
+        );
+
+        $awards = VotingAward::query()
+            ->where('voting_event_id', $event->id)
+            ->orderBy('display_order')
+            ->orderBy('id')
+            ->with(['nominees' => function ($q) {
+                $q->with('votes');
+            }])
+            ->get();
+
+        $safeTitle = str_replace(' ', '_', strtolower(preg_replace('/[^a-zA-Z0-9_\-]/', '_', $event->title)));
+        $typeSuffix = match ($type) {
+            'winners' => '_winners',
+            'results' => '_results',
+            default => '_tabulation',
+        };
+        $filename = "tabulation_{$safeTitle}{$typeSuffix}_" . now()->format('Ymd_His') . '.csv';
+
+        $headers = [
+            'Content-Type' => 'text/csv; charset=UTF-8',
+            'Content-Disposition' => "attachment; filename=\"{$filename}\"",
+            'Pragma' => 'no-cache',
+            'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+            'Expires' => '0',
+        ];
+
+        return response()->stream(function () use ($event, $awards, $type, $shouldRevealNominee) {
+            $handle = fopen('php://output', 'w');
+            if (! is_resource($handle)) {
+                return;
+            }
+
+            // Write UTF-8 BOM so Excel opens with proper character encoding
+            fwrite($handle, "\xEF\xBB\xBF");
+
+            // Event Metadata Header Block
+            fputcsv($handle, ['4Ps AWARDS TABULATION REPORT']);
+            fputcsv($handle, ['Voting Event', $event->title]);
+            fputcsv($handle, ['Operational Status', strtoupper($event->computed_status)]);
+            fputcsv($handle, ['Reveal Date', $event->reveal_date ? $event->reveal_date->format('Y-m-d') : 'To be announced']);
+            fputcsv($handle, ['Generated At', now()->toDateTimeString()]);
+            fputcsv($handle, ['Scoring Formula', 'Final Score = (Division Chief Score * 0.50) + (Section Heads Average * 0.50)']);
+            if (! $shouldRevealNominee) {
+                fputcsv($handle, ['CONFIDENTIALITY NOTICE', 'Identities are sealed pending the official reveal date ceremony.']);
+            }
+            fputcsv($handle, []);
+
+            // 1. Category Winners Summary
+            if ($type === 'all' || $type === 'winners') {
+                fputcsv($handle, ['=== CATEGORY WINNERS PER AWARD ===']);
+                fputcsv($handle, [
+                    'Award Category',
+                    'Outcome / Status',
+                    'Winner Nominee Name',
+                    'Department / Designation',
+                    'Area of Assignment / Organization',
+                    'Final Composite Score (%)',
+                    'DC Weighted Score (50%)',
+                    'SH Weighted Score (50%)',
+                    'Section Heads Voters Count',
+                ]);
+
+                foreach ($awards as $award) {
+                    $sortedNominees = $award->getSortedNominees();
+                    $winners = $sortedNominees->filter(fn ($n) => ($n->computed_rank ?? 1) === 1);
+
+                    if ($winners->isEmpty()) {
+                        fputcsv($handle, [
+                            $award->name,
+                            'No Winner / Pending',
+                            'N/A',
+                            '-',
+                            '-',
+                            '0.00%',
+                            '0.00%',
+                            '0.00%',
+                            0,
+                        ]);
+                    } else {
+                        $isTie = $winners->count() > 1;
+                        foreach ($winners as $winner) {
+                            $nomineeName = $shouldRevealNominee
+                                ? $winner->name
+                                : 'Nominee (Sealed)';
+                            $dept = $shouldRevealNominee
+                                ? ($winner->department ?? 'N/A')
+                                : '[Sealed]';
+                            $org = $shouldRevealNominee
+                                ? ($winner->organization ?? 'N/A')
+                                : '[Sealed]';
+
+                            fputcsv($handle, [
+                                $award->name,
+                                $isTie ? 'Category Co-Winner (Tie)' : 'Official Category Winner',
+                                $nomineeName,
+                                $dept,
+                                $org,
+                                number_format((float) $winner->final_score, 2) . '%',
+                                number_format((float) $winner->dc_weighted_score, 2) . '%',
+                                number_format((float) $winner->sh_weighted_score, 2) . '%',
+                                (int) $winner->sh_count,
+                            ]);
+                        }
+                    }
+                }
+
+                fputcsv($handle, []);
+            }
+
+            // 2. Full Tabulation Breakdown & Rankings
+            if ($type === 'all' || $type === 'results') {
+                fputcsv($handle, ['=== COMPLETE TABULATION RESULTS & RANKINGS PER AWARD ===']);
+                fputcsv($handle, [
+                    'Award Category',
+                    'Rank',
+                    'Outcome',
+                    'Nominee Name',
+                    'Department / Designation',
+                    'Area of Assignment / Organization',
+                    'DC Raw Score (out of 100)',
+                    'DC Weighted Score (50%)',
+                    'SH Average Score (out of 100)',
+                    'SH Weighted Score (50%)',
+                    'Final Composite Score (%)',
+                    'Section Heads Count',
+                ]);
+
+                foreach ($awards as $award) {
+                    $sortedNominees = $award->getSortedNominees();
+
+                    foreach ($sortedNominees as $index => $nominee) {
+                        $rank = $nominee->computed_rank ?? ($index + 1);
+                        $isWinner = $rank === 1;
+                        $isTie = (bool) ($nominee->is_tied ?? false);
+
+                        $statusText = match (true) {
+                            $isWinner && $isTie => 'Co-Winner (Tie)',
+                            $isWinner => 'Winner',
+                            default => "Rank {$rank}",
+                        };
+
+                        $nomineeName = $shouldRevealNominee
+                            ? $nominee->name
+                            : ('Nominee #' . ($index + 1));
+                        $dept = $shouldRevealNominee
+                            ? ($nominee->department ?? 'N/A')
+                            : '[Sealed]';
+                        $org = $shouldRevealNominee
+                            ? ($nominee->organization ?? 'N/A')
+                            : '[Sealed]';
+
+                        fputcsv($handle, [
+                            $award->name,
+                            $rank,
+                            $statusText,
+                            $nomineeName,
+                            $dept,
+                            $org,
+                            number_format((float) $nominee->dc_score, 2),
+                            number_format((float) $nominee->dc_weighted_score, 2) . '%',
+                            number_format((float) $nominee->sh_average, 2),
+                            number_format((float) $nominee->sh_weighted_score, 2) . '%',
+                            number_format((float) $nominee->final_score, 2) . '%',
+                            (int) $nominee->sh_count,
+                        ]);
+                    }
+
+                    if ($sortedNominees->isEmpty()) {
+                        fputcsv($handle, [
+                            $award->name,
+                            '-',
+                            'No Nominees',
+                            '-',
+                            '-',
+                            '-',
+                            '0.00',
+                            '0.00%',
+                            '0.00',
+                            '0.00%',
+                            '0.00%',
+                            0,
+                        ]);
+                    }
+                }
+            }
+
+            fclose($handle);
+        }, 200, $headers);
     }
 
     /**

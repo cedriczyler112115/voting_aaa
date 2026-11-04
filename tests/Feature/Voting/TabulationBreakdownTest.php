@@ -189,5 +189,65 @@ class TabulationBreakdownTest extends TestCase
             ->where('division_chief.scores', [])
         );
     }
+
+    public function test_export_tabulation_all_results_and_winners(): void
+    {
+        $response = $this->actingAs($this->admin)->get("/tabulation-results/export?event_id={$this->event->id}&type=all");
+
+        $response->assertOk();
+        $this->assertStringContainsString('text/csv', $response->headers->get('Content-Type') ?? '');
+        $this->assertStringContainsString('tabulation_breakdown_test_event_tabulation', $response->headers->get('Content-Disposition') ?? '');
+
+        $content = $response->streamedContent();
+        $this->assertStringContainsString('4Ps AWARDS TABULATION REPORT', $content);
+        $this->assertStringContainsString('=== CATEGORY WINNERS PER AWARD ===', $content);
+        $this->assertStringContainsString('=== COMPLETE TABULATION RESULTS & RANKINGS PER AWARD ===', $content);
+        $this->assertStringContainsString('Top Innovator', $content);
+        $this->assertStringContainsString('Alice Wonder', $content);
+    }
+
+    public function test_export_tabulation_winners_only(): void
+    {
+        $response = $this->actingAs($this->admin)->get("/tabulation-results/export?event_id={$this->event->id}&type=winners");
+
+        $response->assertOk();
+        $content = $response->streamedContent();
+        $this->assertStringContainsString('=== CATEGORY WINNERS PER AWARD ===', $content);
+        $this->assertStringNotContainsString('=== COMPLETE TABULATION RESULTS & RANKINGS PER AWARD ===', $content);
+        $this->assertStringContainsString('Top Innovator', $content);
+        $this->assertStringContainsString('Alice Wonder', $content);
+    }
+
+    public function test_export_tabulation_results_only(): void
+    {
+        $response = $this->actingAs($this->admin)->get("/tabulation-results/export?event_id={$this->event->id}&type=results");
+
+        $response->assertOk();
+        $content = $response->streamedContent();
+        $this->assertStringNotContainsString('=== CATEGORY WINNERS PER AWARD ===', $content);
+        $this->assertStringContainsString('=== COMPLETE TABULATION RESULTS & RANKINGS PER AWARD ===', $content);
+        $this->assertStringContainsString('Top Innovator', $content);
+        $this->assertStringContainsString('Alice Wonder', $content);
+    }
+
+    public function test_export_masks_identities_for_regular_voter_before_reveal_date(): void
+    {
+        $response = $this->actingAs($this->regularVoter)->get("/tabulation-results/export?event_id={$this->event->id}&type=all");
+
+        $response->assertOk();
+        $content = $response->streamedContent();
+        $this->assertStringContainsString('CONFIDENTIALITY NOTICE', $content);
+        $this->assertStringContainsString('Nominee #1', $content);
+        $this->assertStringNotContainsString('Alice Wonder', $content);
+    }
+
+    public function test_export_reveals_identities_for_user_id_2_before_reveal_date(): void
+    {
+        $response = $this->actingAs($this->divisionChief)->get("/tabulation-results/export?event_id={$this->event->id}&type=all");
+
+        $response->assertOk();
+        $content = $response->streamedContent();
+        $this->assertStringContainsString('Alice Wonder', $content);
+    }
 }
 

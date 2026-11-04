@@ -3,12 +3,21 @@ import {
     Briefcase,
     Building2,
     Calculator,
+    ChevronDown,
     Crown,
+    Download,
+    FileSpreadsheet,
     MapPin,
     Sparkles,
     Trophy,
     User,
 } from 'lucide-react';
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import AppLayout from '@/layouts/app-layout';
 
 type NomineeResult = {
@@ -85,6 +94,11 @@ export default function TabulationResult({
         );
     };
 
+    const handleDownloadExcel = (type: 'all' | 'winners' | 'results' = 'all') => {
+        if (!selected_event) return;
+        window.location.href = `/tabulation-results/export?event_id=${selected_event.id}&type=${type}`;
+    };
+
     const categoryWinners = awards
         .map((award) => {
             if (!award.nominees || award.nominees.length === 0) return null;
@@ -138,7 +152,7 @@ export default function TabulationResult({
                         </p>
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex flex-wrap items-center gap-2.5">
                         {events.length > 0 && (
                             <select
                                 value={selected_event_id || ''}
@@ -153,6 +167,64 @@ export default function TabulationResult({
                                     </option>
                                 ))}
                             </select>
+                        )}
+
+                        {selected_event && (
+                            <div className="inline-flex items-center rounded-xl shadow-2xs">
+                                <button
+                                    type="button"
+                                    onClick={() => handleDownloadExcel('all')}
+                                    className="inline-flex items-center gap-2 rounded-l-xl bg-emerald-600 px-3.5 py-2 text-xs font-bold text-white shadow-2xs transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                                    title={`Download Excel result for ${selected_event.title}`}
+                                >
+                                    <FileSpreadsheet className="h-4 w-4" />
+                                    <span>Download Excel</span>
+                                </button>
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button
+                                            type="button"
+                                            className="inline-flex items-center rounded-r-xl border-l border-emerald-700/60 bg-emerald-600 px-2 py-2 text-xs font-bold text-white transition-colors hover:bg-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+                                            aria-label="Download options"
+                                            title="Choose export options"
+                                        >
+                                            <ChevronDown className="h-3.5 w-3.5" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" className="w-60">
+                                        <DropdownMenuItem
+                                            onClick={() => handleDownloadExcel('all')}
+                                            className="cursor-pointer gap-2 py-2"
+                                        >
+                                            <FileSpreadsheet className="h-4 w-4 text-emerald-600 shrink-0" />
+                                            <div className="flex flex-col">
+                                                <span className="font-semibold text-xs text-foreground">All Results & Winners</span>
+                                                <span className="text-[10px] text-muted-foreground">Complete tabulation & winners workbook</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                            onClick={() => handleDownloadExcel('winners')}
+                                            className="cursor-pointer gap-2 py-2"
+                                        >
+                                            <Trophy className="h-4 w-4 text-amber-500 shrink-0" />
+                                            <div className="flex flex-col">
+                                                <span className="font-semibold text-xs text-foreground">Category Winners per Award</span>
+                                                <span className="text-[10px] text-muted-foreground">Top-ranking winners and tie results</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                        <DropdownMenuItem
+                                            onClick={() => handleDownloadExcel('results')}
+                                            className="cursor-pointer gap-2 py-2"
+                                        >
+                                            <Download className="h-4 w-4 text-primary shrink-0" />
+                                            <div className="flex flex-col">
+                                                <span className="font-semibold text-xs text-foreground">Full Rankings & Scores</span>
+                                                <span className="text-[10px] text-muted-foreground">All evaluated nominees per award</span>
+                                            </div>
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            </div>
                         )}
                     </div>
                 </div>

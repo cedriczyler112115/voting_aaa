@@ -956,10 +956,17 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                                             Criteria: {award.criteria?.length || 0} ({award.total_criteria_score || 0}%)
                                                         </span>
                                                         <span>•</span>
-                                                        <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-0.5 text-[11px] font-semibold text-purple-700 dark:text-purple-300">
-                                                            <Shield className="h-3 w-3" />
-                                                            50% Evaluator: {award.lead_evaluator?.name || 'Default (Division Chief)'}
-                                                        </span>
+                                                        {award.lead_evaluator ? (
+                                                            <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-0.5 text-[11px] font-semibold text-purple-700 dark:text-purple-300">
+                                                                <Shield className="h-3 w-3" />
+                                                                50% Evaluator: {award.lead_evaluator.name}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-300">
+                                                                <Users className="h-3 w-3" />
+                                                                100% General Voters
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </div>
                                             </div>
@@ -1846,7 +1853,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                     }
                                 />
                                 <p className="mt-1.5 text-[11px] text-muted-foreground">
-                                    Assign any user to evaluate this award with a 50% weight. The scores of all other voters will be averaged for the remaining 50%.
+                                    Optional: Assign an evaluator to carry 50% scoring weight (other voters share the remaining 50%). If unassigned, all allowed voters carry equal 100% weight.
                                 </p>
                             </div>
 

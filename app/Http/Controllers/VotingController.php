@@ -714,6 +714,7 @@ class VotingController extends Controller
                             'sh_count' => (int) $nominee->sh_count,
                             'sh_average' => number_format((float) $nominee->sh_average, 2),
                             'sh_weighted_score' => number_format((float) $nominee->sh_weighted_score, 2),
+                            'has_lead_evaluator' => (bool) ($nominee->has_lead_evaluator ?? false),
                             'rank' => $nominee->computed_rank ?? ($index + 1),
                             'is_tied' => (bool) ($nominee->is_tied ?? false),
                         ];
@@ -724,6 +725,8 @@ class VotingController extends Controller
                     'name' => $award->name,
                     'description' => $award->description,
                     'is_hidden' => false,
+                    'has_lead_evaluator' => $award->hasLeadEvaluator(),
+                    'lead_evaluator_id' => $award->lead_evaluator_id,
                     'total_votes' => $totalPoints,
                     'total_points' => $totalPoints,
                     'distinct_ballots' => $distinctBallots,
@@ -824,6 +827,7 @@ class VotingController extends Controller
                                 'is_tied' => (bool) ($nominee->is_tied ?? false),
                                 'is_masked' => ! $shouldRevealNominee,
                                 'is_winner' => $isWinner,
+                                'has_lead_evaluator' => (bool) ($nominee->has_lead_evaluator ?? false),
                             ];
                         });
 
@@ -831,6 +835,8 @@ class VotingController extends Controller
                         'id' => $award->id,
                         'name' => $award->name,
                         'description' => $award->description,
+                        'has_lead_evaluator' => $award->hasLeadEvaluator(),
+                        'lead_evaluator_id' => $award->lead_evaluator_id,
                         'total_votes' => $totalPoints,
                         'total_points' => $totalPoints,
                         'distinct_ballots' => $distinctBallots,
@@ -943,7 +949,7 @@ class VotingController extends Controller
             fputcsv($handle, ['Operational Status', strtoupper($event->computed_status)]);
             fputcsv($handle, ['Reveal Date', $event->reveal_date ? $event->reveal_date->format('Y-m-d') : 'To be announced']);
             fputcsv($handle, ['Generated At', now()->toDateTimeString()]);
-            fputcsv($handle, ['Scoring Formula', 'Final Score = (Lead Evaluator Score * 0.50) + (Other Evaluators Average * 0.50)']);
+            fputcsv($handle, ['Scoring Formula', 'When Lead Evaluator is set: 50% Lead Evaluator + 50% Other Evaluators Average. When not set: 100% General Voters Average.']);
             if (! $shouldRevealNominee) {
                 fputcsv($handle, ['CONFIDENTIALITY NOTICE', 'Identities are sealed pending the official reveal date ceremony.']);
             }
@@ -958,15 +964,16 @@ class VotingController extends Controller
                     'Winner Nominee Name',
                     'Department / Designation',
                     'Area of Assignment / Organization',
-                    'Final Composite Score (%)',
+                    'Final Score (%)',
                     'Lead Evaluator Weighted Score (50%)',
-                    'Other Evaluators Weighted Score (50%)',
-                    'Other Evaluators Voters Count',
+                    'Other Evaluators / Voters Weighted Score',
+                    'Voters Count',
                 ]);
 
                 foreach ($awards as $award) {
                     $sortedNominees = $award->getSortedNominees();
                     $winners = $sortedNominees->filter(fn ($n) => ($n->computed_rank ?? 1) === 1);
+                    $hasLead = $award->hasLeadEvaluator();
 
                     if ($winners->isEmpty()) {
                         fputcsv($handle, [
@@ -976,7 +983,7 @@ class VotingController extends Controller
                             '-',
                             '-',
                             '0.00%',
-                            '0.00%',
+                            $hasLead ? '0.00%' : 'N/A',
                             '0.00%',
                             0,
                         ]);
@@ -1000,8 +1007,10 @@ class VotingController extends Controller
                                 $dept,
                                 $org,
                                 number_format((float) $winner->final_score, 2) . '%',
-                                number_format((float) $winner->dc_weighted_score, 2) . '%',
-                                number_format((float) $winner->sh_weighted_score, 2) . '%',
+                                $hasLead ? (number_format((float) $winner->dc_weighted_score, 2) . '%') : 'N/A (100% General)',
+                                $hasLead
+                                    ? (number_format((float) $winner->sh_weighted_score, 2) . '% (50%)')
+                                    : (number_format((float) $winner->final_score, 2) . '% (100%)'),
                                 (int) $winner->sh_count,
                             ]);
                         }
@@ -1021,16 +1030,17 @@ class VotingController extends Controller
                     'Nominee Name',
                     'Department / Designation',
                     'Area of Assignment / Organization',
-                    'DC Raw Score (out of 100)',
-                    'DC Weighted Score (50%)',
-                    'SH Average Score (out of 100)',
-                    'SH Weighted Score (50%)',
-                    'Final Composite Score (%)',
-                    'Section Heads Count',
+                    'Lead Raw Score (50%)',
+                    'Lead Weighted Score (50%)',
+                    'Other Raters Avg Score',
+                    'Other / General Weighted Score',
+                    'Final Score (%)',
+                    'Voters Count',
                 ]);
 
                 foreach ($awards as $award) {
                     $sortedNominees = $award->getSortedNominees();
+                    $hasLead = $award->hasLeadEvaluator();
 
                     foreach ($sortedNominees as $index => $nominee) {
                         $rank = $nominee->computed_rank ?? ($index + 1);
@@ -1060,10 +1070,12 @@ class VotingController extends Controller
                             $nomineeName,
                             $dept,
                             $org,
-                            number_format((float) $nominee->dc_score, 2),
-                            number_format((float) $nominee->dc_weighted_score, 2) . '%',
+                            $hasLead ? number_format((float) $nominee->dc_score, 2) : 'N/A',
+                            $hasLead ? (number_format((float) $nominee->dc_weighted_score, 2) . '%') : 'N/A',
                             number_format((float) $nominee->sh_average, 2),
-                            number_format((float) $nominee->sh_weighted_score, 2) . '%',
+                            $hasLead
+                                ? (number_format((float) $nominee->sh_weighted_score, 2) . '%')
+                                : (number_format((float) $nominee->final_score, 2) . '% (100%)'),
                             number_format((float) $nominee->final_score, 2) . '%',
                             (int) $nominee->sh_count,
                         ]);
@@ -1100,6 +1112,7 @@ class VotingController extends Controller
         $user = $request->user();
         $leadEvaluatorId = $award->getLeadEvaluatorId();
         $leadEvaluator = $award->getLeadEvaluator();
+        $hasLeadEvaluator = $award->hasLeadEvaluator();
         $isAdminOrChief = $user && ($user->isAdmin() || ($leadEvaluatorId && (int) $user->id === (int) $leadEvaluatorId) || (int) $user->id === 2);
 
         $award->load([
@@ -1119,11 +1132,11 @@ class VotingController extends Controller
         $criteria = $award->criteria;
         $totalCriteriaScore = $criteria->sum('max_score') ?: 100;
 
-        // Get ranked nominees using the standard 50% DC + 50% SH formula
+        // Get ranked nominees using the standard formula (50/50 if lead evaluator set, else 100% voter average)
         $sortedNominees = $award->getSortedNominees();
 
         // Build list of nominees with their computed stats
-        $nomineesList = $sortedNominees->map(function (VotingNominee $nominee, int $index) use ($shouldRevealNominee) {
+        $nomineesList = $sortedNominees->map(function (VotingNominee $nominee, int $index) use ($shouldRevealNominee, $hasLeadEvaluator) {
             $rank = $nominee->computed_rank ?? ($index + 1);
 
             return [
@@ -1133,6 +1146,7 @@ class VotingController extends Controller
                 'department' => $shouldRevealNominee ? $nominee->department : null,
                 'organization' => $shouldRevealNominee ? $nominee->organization : null,
                 'status' => $nominee->status,
+                'has_lead_evaluator' => $hasLeadEvaluator,
                 'dc_score' => (float) $nominee->dc_score,
                 'dc_score_formatted' => number_format((float) $nominee->dc_score, 2),
                 'dc_weighted_score' => (float) $nominee->dc_weighted_score,
@@ -1154,9 +1168,9 @@ class VotingController extends Controller
             ];
         });
 
-        // 1. Lead / 50% Evaluator scores per nominee & criteria
+        // 1. Lead / 50% Evaluator scores per nominee & criteria (only when hasLeadEvaluator)
         $leadNomineeScores = [];
-        if ($canViewScores) {
+        if ($canViewScores && $hasLeadEvaluator) {
             foreach ($award->nominees as $nominee) {
                 $leadVote = $leadEvaluatorId ? $nominee->votes->firstWhere('voter_id', $leadEvaluatorId) : null;
                 $criteriaMap = [];
@@ -1216,7 +1230,7 @@ class VotingController extends Controller
             }
         }
 
-        // Summary row for Section Heads matrix:
+        // Summary row for Section Heads / general voters matrix:
         $shSummary = [];
         if ($canViewScores) {
             foreach ($nomineesList as $nominee) {
@@ -1247,7 +1261,9 @@ class VotingController extends Controller
                 'nominees_count' => $award->nominees->count(),
                 'total_votes' => $award->nominees->sum(fn ($n) => $n->votes->sum('score')),
                 'lead_evaluator_id' => $award->lead_evaluator_id,
+                'has_lead_evaluator' => $hasLeadEvaluator,
             ],
+            'has_lead_evaluator' => $hasLeadEvaluator,
             'criteria' => $criteria->map(fn ($c) => [
                 'id' => $c->id,
                 'name' => $c->name,
@@ -1257,20 +1273,20 @@ class VotingController extends Controller
             ]),
             'total_criteria_score' => (float) $totalCriteriaScore,
             'nominees' => $nomineesList,
-            'lead_evaluator' => [
-                'id' => $leadEvaluator?->id ?? $leadEvaluatorId ?? 2,
+            'lead_evaluator' => $hasLeadEvaluator ? [
+                'id' => $leadEvaluator?->id ?? $leadEvaluatorId,
                 'name' => $leadEvaluator ? $leadEvaluator->display_name : 'Lead Evaluator',
                 'email' => $leadEvaluator?->email,
                 'position' => $leadEvaluator?->position ?: 'Lead Evaluator (50%)',
                 'department' => $leadEvaluator?->section ?: ($leadEvaluator?->division ?: ($leadEvaluator?->department ?? 'Evaluator Office')),
                 'scores' => $leadNomineeScores,
-            ],
-            'division_chief' => [
-                'id' => $leadEvaluator?->id ?? $leadEvaluatorId ?? 2,
+            ] : null,
+            'division_chief' => $hasLeadEvaluator ? [
+                'id' => $leadEvaluator?->id ?? $leadEvaluatorId,
                 'name' => $leadEvaluator ? $leadEvaluator->display_name : 'Lead Evaluator',
                 'department' => $leadEvaluator?->section ?: ($leadEvaluator?->division ?: ($leadEvaluator?->department ?? 'Evaluator Office')),
                 'scores' => $leadNomineeScores,
-            ],
+            ] : null,
             'section_heads' => $sectionHeadsList,
             'section_heads_summary' => $shSummary,
             'can_reveal' => (bool) $isAdminOrChief,

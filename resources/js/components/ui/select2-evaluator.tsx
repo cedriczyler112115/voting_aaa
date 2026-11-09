@@ -6,6 +6,7 @@ import {
     Search,
     Shield,
     User,
+    Users,
     UserX,
     X,
 } from 'lucide-react';
@@ -220,14 +221,14 @@ export default function Select2Evaluator({
                         </>
                     ) : (
                         <div className="flex items-center gap-2 text-foreground">
-                            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-purple-500/10 text-purple-600 dark:text-purple-400">
-                                <Shield className="h-3 w-3" />
+                            <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                                <Users className="h-3 w-3" />
                             </div>
                             <span className="font-medium text-foreground">
-                                Default (Division Chief / User ID: 2)
+                                None (100% General Voters - No Lead Evaluator)
                             </span>
-                            <span className="hidden rounded-sm bg-muted px-1.5 py-0.2 text-[10px] font-semibold text-muted-foreground sm:inline">
-                                Fallback
+                            <span className="hidden rounded-sm bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:text-emerald-300 sm:inline">
+                                100% Voters
                             </span>
                         </div>
                     )}
@@ -239,7 +240,7 @@ export default function Select2Evaluator({
                         <button
                             type="button"
                             onClick={handleClear}
-                            title="Clear selection (use default Division Chief)"
+                            title="Clear selection (use 100% general voters scoring)"
                             className="rounded p-0.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                         >
                             <X className="h-3.5 w-3.5" />
@@ -292,7 +293,7 @@ export default function Select2Evaluator({
 
                     {/* Options List */}
                     <div ref={listRef} className="max-h-60 overflow-y-auto py-1">
-                        {/* Option 0: Default (Division Chief) Option */}
+                        {/* Option 0: None (100% General Voters) Option */}
                         <div
                             data-select2-item
                             onClick={() => handleSelect(null)}
@@ -307,18 +308,18 @@ export default function Select2Evaluator({
                             )}
                         >
                             <div className="flex items-center gap-2.5 min-w-0">
-                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-purple-500/10 text-purple-600 dark:text-purple-400">
-                                    <Shield className="h-3.5 w-3.5" />
+                                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
+                                    <Users className="h-3.5 w-3.5" />
                                 </div>
                                 <div className="min-w-0">
                                     <div className="flex items-center gap-1.5 font-bold">
-                                        <span>Default (Division Chief / User ID: 2)</span>
-                                        <span className="rounded-full bg-purple-500/10 px-2 py-0.2 text-[9px] font-bold text-purple-700 dark:text-purple-300">
-                                            50%
+                                        <span>None (100% General Voters - No Lead Evaluator)</span>
+                                        <span className="rounded-full bg-emerald-500/10 px-2 py-0.2 text-[9px] font-bold text-emerald-700 dark:text-emerald-300">
+                                            100% All Voters
                                         </span>
                                     </div>
                                     <div className="text-[11px] text-muted-foreground">
-                                        Standard system fallback for 50% weighted scoring
+                                        All allowed voters carry equal weight; no 50% split applied
                                     </div>
                                 </div>
                             </div>

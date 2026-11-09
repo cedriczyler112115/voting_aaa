@@ -26,6 +26,7 @@ type NomineeResult = {
     sh_count: number;
     sh_average: string;
     sh_weighted_score: string;
+    has_lead_evaluator?: boolean;
     rank: number;
     is_tied?: boolean;
 };
@@ -35,6 +36,8 @@ type AwardResult = {
     name: string;
     description: string | null;
     is_hidden: boolean;
+    has_lead_evaluator?: boolean;
+    lead_evaluator_id?: number | null;
     total_votes: number;
     total_points?: number;
     distinct_ballots?: number;
@@ -214,49 +217,74 @@ export default function VotingResults({ event, awards }: Props) {
                                                         </div>
                                                     </div>
 
-                                                    {/* 50/50 Breakdown & Final Score */}
+                                                    {/* Score Breakdown & Final Score */}
                                                     <div className="flex flex-wrap items-center gap-4 sm:justify-end">
-                                                        {/* Lead Evaluator Component */}
-                                                        <div className="rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1.5 text-center text-xs">
-                                                            <div className="text-[10px] font-semibold text-muted-foreground">
-                                                                Lead (50%)
-                                                            </div>
-                                                            <div className="font-bold text-foreground">
-                                                                {nominee.dc_has_voted ? (
-                                                                    <span>
-                                                                        {nominee.dc_score}%{' '}
-                                                                        <span className="text-[10px] text-primary">
-                                                                            ({nominee.dc_weighted_score}%)
-                                                                        </span>
-                                                                    </span>
-                                                                ) : (
-                                                                    <span className="text-muted-foreground italic">
-                                                                        Pending
-                                                                    </span>
-                                                                )}
-                                                            </div>
-                                                        </div>
+                                                        {award.has_lead_evaluator ? (
+                                                            <>
+                                                                {/* Lead Evaluator Component */}
+                                                                <div className="rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1.5 text-center text-xs">
+                                                                    <div className="text-[10px] font-semibold text-muted-foreground">
+                                                                        Lead (50%)
+                                                                    </div>
+                                                                    <div className="font-bold text-foreground">
+                                                                        {nominee.dc_has_voted ? (
+                                                                            <span>
+                                                                                {nominee.dc_score}%{' '}
+                                                                                <span className="text-[10px] text-primary">
+                                                                                    ({nominee.dc_weighted_score}%)
+                                                                                </span>
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="text-muted-foreground italic">
+                                                                                Pending
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
 
-                                                        {/* Other Evaluators Component */}
-                                                        <div className="rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1.5 text-center text-xs">
-                                                            <div className="text-[10px] font-semibold text-muted-foreground">
-                                                                Others (50%)
-                                                            </div>
-                                                            <div className="font-bold text-foreground">
-                                                                {nominee.sh_count > 0 ? (
-                                                                    <span>
-                                                                        {nominee.sh_average}%{' '}
-                                                                        <span className="text-[10px] text-primary">
-                                                                            ({nominee.sh_weighted_score}%)
+                                                                {/* Other Evaluators Component */}
+                                                                <div className="rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1.5 text-center text-xs">
+                                                                    <div className="text-[10px] font-semibold text-muted-foreground">
+                                                                        Others (50%)
+                                                                    </div>
+                                                                    <div className="font-bold text-foreground">
+                                                                        {nominee.sh_count > 0 ? (
+                                                                            <span>
+                                                                                {nominee.sh_average}%{' '}
+                                                                                <span className="text-[10px] text-primary">
+                                                                                    ({nominee.sh_weighted_score}%)
+                                                                                </span>
+                                                                            </span>
+                                                                        ) : (
+                                                                            <span className="text-muted-foreground italic">
+                                                                                0 votes
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            </>
+                                                        ) : (
+                                                            /* 100% General Voters Score Box */
+                                                            <div className="rounded-lg border border-border/60 bg-muted/30 px-3 py-1.5 text-center text-xs">
+                                                                <div className="text-[10px] font-semibold text-muted-foreground">
+                                                                    Voter Average (100%)
+                                                                </div>
+                                                                <div className="font-bold text-foreground">
+                                                                    {nominee.sh_count > 0 ? (
+                                                                        <span>
+                                                                            {nominee.sh_average}%{' '}
+                                                                            <span className="text-[10px] text-muted-foreground font-normal">
+                                                                                ({nominee.sh_count} {nominee.sh_count === 1 ? 'voter' : 'voters'})
+                                                                            </span>
                                                                         </span>
-                                                                    </span>
-                                                                ) : (
-                                                                    <span className="text-muted-foreground italic">
-                                                                        0 votes
-                                                                    </span>
-                                                                )}
+                                                                    ) : (
+                                                                        <span className="text-muted-foreground italic">
+                                                                            No votes yet
+                                                                        </span>
+                                                                    )}
+                                                                </div>
                                                             </div>
-                                                        </div>
+                                                        )}
 
                                                         {/* Final Score */}
                                                         <div className="text-right">
@@ -264,7 +292,7 @@ export default function VotingResults({ event, awards }: Props) {
                                                                 {nominee.final_score}%
                                                             </div>
                                                             <div className="text-[11px] font-medium text-muted-foreground">
-                                                                Final Weighted Score
+                                                                {award.has_lead_evaluator ? 'Final Weighted Score' : 'Final Score'}
                                                             </div>
                                                         </div>
                                                     </div>

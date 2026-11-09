@@ -63,6 +63,7 @@ class TabulationBreakdownTest extends TestCase
         $this->award = VotingAward::create([
             'voting_event_id' => $this->event->id,
             'name' => 'Top Innovator',
+            'lead_evaluator_id' => $this->divisionChief->id,
             'status' => 'active',
             'display_order' => 1,
         ]);
@@ -334,6 +335,89 @@ class TabulationBreakdownTest extends TestCase
             ->where('lead_evaluator.name', 'Special Committee Chair')
             ->where('can_reveal', true)
             ->where('nominees.0.name', 'Bob Builder')
+        );
+    }
+
+    public function test_when_lead_evaluator_is_not_set_does_not_fallback_to_user_2_and_scores_100_percent_for_all_voters(): void
+    {
+        $openAward = VotingAward::create([
+            'voting_event_id' => $this->event->id,
+            'name' => 'Community Champion Award',
+            'lead_evaluator_id' => null, // Explicitly not set
+            'status' => 'active',
+            'display_order' => 3,
+        ]);
+
+        $criterion = VotingCriterion::create([
+            'voting_award_id' => $openAward->id,
+            'name' => 'Dedication',
+            'max_score' => 100,
+            'display_order' => 1,
+        ]);
+
+        $nominee = VotingNominee::create([
+            'voting_award_id' => $openAward->id,
+            'name' => 'Charlie Chaplin',
+            'status' => 'active',
+            'display_order' => 1,
+        ]);
+
+        // User id = 2 votes 90
+        $v1 = VotingVote::create([
+            'voting_event_id' => $this->event->id,
+            'voting_award_id' => $openAward->id,
+            'voting_nominee_id' => $nominee->id,
+            'voter_id' => $this->divisionChief->id, // id 2
+            'score' => 90,
+            'voted_at' => now(),
+        ]);
+        VotingVoteScore::create([
+            'voting_vote_id' => $v1->id,
+            'voting_criterion_id' => $criterion->id,
+            'score' => 90,
+        ]);
+
+        // User id = 3 votes 70
+        $v2 = VotingVote::create([
+            'voting_event_id' => $this->event->id,
+            'voting_award_id' => $openAward->id,
+            'voting_nominee_id' => $nominee->id,
+            'voter_id' => $this->regularVoter->id, // id 3
+            'score' => 70,
+            'voted_at' => now(),
+        ]);
+        VotingVoteScore::create([
+            'voting_vote_id' => $v2->id,
+            'voting_criterion_id' => $criterion->id,
+            'score' => 70,
+        ]);
+
+        $this->assertNull($openAward->getLeadEvaluatorId());
+        $this->assertFalse($openAward->hasLeadEvaluator());
+
+        $nominees = $openAward->getSortedNominees();
+        $this->assertCount(1, $nominees);
+        $charlie = $nominees[0];
+
+        // Scoring is 100% average of all allowed voters: (90 + 70) / 2 = 80.0
+        // No 50/50 split applied:
+        $this->assertFalse($charlie->has_lead_evaluator);
+        $this->assertEquals(0.0, $charlie->lead_score);
+        $this->assertEquals(0.0, $charlie->lead_weighted_score);
+        $this->assertEquals(2, $charlie->sh_count);
+        $this->assertEquals(160.0, $charlie->sh_total);
+        $this->assertEquals(80.0, $charlie->sh_average);
+        $this->assertEquals(80.0, $charlie->final_score);
+
+        // Verify tabulation breakdown view reflects no lead evaluator
+        $response = $this->actingAs($this->admin)->get("/tabulation-results/breakdown/{$openAward->id}");
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $page) => $page
+            ->component('voting/tabulation-breakdown')
+            ->where('has_lead_evaluator', false)
+            ->where('lead_evaluator', null)
+            ->has('section_heads', 2) // Both voters are in general voters list
+            ->where('nominees.0.final_score_formatted', '80.00')
         );
     }
 }

@@ -106,12 +106,15 @@ type Props = {
         status: string;
         nominees_count: number;
         total_votes: number;
+        lead_evaluator_id?: number | null;
+        has_lead_evaluator?: boolean;
     };
+    has_lead_evaluator?: boolean;
     criteria: CriterionItem[];
     total_criteria_score: number;
     nominees: NomineeItem[];
-    lead_evaluator?: DivisionChiefData;
-    division_chief: DivisionChiefData;
+    lead_evaluator?: DivisionChiefData | null;
+    division_chief?: DivisionChiefData | null;
     section_heads: SectionHeadVoter[];
     section_heads_summary: Record<
         number,
@@ -133,6 +136,7 @@ export default function TabulationBreakdown({
     criteria,
     total_criteria_score,
     nominees,
+    has_lead_evaluator,
     lead_evaluator,
     division_chief,
     section_heads,
@@ -141,6 +145,11 @@ export default function TabulationBreakdown({
     can_view_scores,
     is_reveal_date_reached = false,
 }: Props) {
+    const hasLead = Boolean(
+        has_lead_evaluator ??
+        award.has_lead_evaluator ??
+        (lead_evaluator !== null && lead_evaluator !== undefined)
+    );
     const evaluator = lead_evaluator || division_chief;
     const evaluatorName = evaluator?.name || 'Lead Evaluator';
     const [showCriteriaBreakdown, setShowCriteriaBreakdown] = useState(false);
@@ -256,7 +265,11 @@ export default function TabulationBreakdown({
                                     </div>
                                 </div>
                                 <div className="text-[11px] font-semibold text-muted-foreground text-center sm:text-right">
-                                    50% Lead Evaluator ({winners[0].dc_weighted_score_formatted}%) + 50% Other Evaluators ({winners[0].sh_weighted_score_formatted}%)
+                                    {hasLead ? (
+                                        <>50% Lead Evaluator ({winners[0].dc_weighted_score_formatted}%) + 50% Other Evaluators ({winners[0].sh_weighted_score_formatted}%)</>
+                                    ) : (
+                                        <>100% General Voters Score ({winners[0].sh_count} {winners[0].sh_count === 1 ? 'voter' : 'voters'} evaluated)</>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -268,41 +281,83 @@ export default function TabulationBreakdown({
                                 <span>Computation Formula & Step-by-Step Resolution:</span>
                             </div>
                             <div className="mt-3 grid gap-3 sm:grid-cols-3 text-xs">
-                                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
-                                    <div className="font-bold text-muted-foreground uppercase text-[10px]">
-                                        Step 1: Lead Evaluator Score (50%)
-                                    </div>
-                                    <div className="mt-1 font-mono text-base font-extrabold text-foreground">
-                                        {winners[0].dc_score_formatted} × 50% = <span className="text-primary">{winners[0].dc_weighted_score_formatted}%</span>
-                                    </div>
-                                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                                        Raw rating from {evaluatorName} out of 100 multiplied by 0.50
-                                    </p>
-                                </div>
+                                {hasLead ? (
+                                    <>
+                                        <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                                            <div className="font-bold text-muted-foreground uppercase text-[10px]">
+                                                Step 1: Lead Evaluator Score (50%)
+                                            </div>
+                                            <div className="mt-1 font-mono text-base font-extrabold text-foreground">
+                                                {winners[0].dc_score_formatted} × 50% = <span className="text-primary">{winners[0].dc_weighted_score_formatted}%</span>
+                                            </div>
+                                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                                Raw rating from {evaluatorName} out of 100 multiplied by 0.50
+                                            </p>
+                                        </div>
 
-                                <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
-                                    <div className="font-bold text-muted-foreground uppercase text-[10px]">
-                                        Step 2: Other Evaluators' Average (50%)
-                                    </div>
-                                    <div className="mt-1 font-mono text-base font-extrabold text-foreground">
-                                        {winners[0].sh_average_formatted} × 50% = <span className="text-primary">{winners[0].sh_weighted_score_formatted}%</span>
-                                    </div>
-                                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                                        ({winners[0].sh_total_formatted} total ÷ {winners[0].sh_count} Evaluators) × 0.50
-                                    </p>
-                                </div>
+                                        <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                                            <div className="font-bold text-muted-foreground uppercase text-[10px]">
+                                                Step 2: Other Evaluators' Average (50%)
+                                            </div>
+                                            <div className="mt-1 font-mono text-base font-extrabold text-foreground">
+                                                {winners[0].sh_average_formatted} × 50% = <span className="text-primary">{winners[0].sh_weighted_score_formatted}%</span>
+                                            </div>
+                                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                                ({winners[0].sh_total_formatted} total ÷ {winners[0].sh_count} Evaluators) × 0.50
+                                            </p>
+                                        </div>
 
-                                <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
-                                    <div className="font-bold text-emerald-800 dark:text-emerald-300 uppercase text-[10px]">
-                                        Step 3: Final Composite Score
-                                    </div>
-                                    <div className="mt-1 font-mono text-base font-black text-emerald-600 dark:text-emerald-400">
-                                        {winners[0].dc_weighted_score_formatted} + {winners[0].sh_weighted_score_formatted} = <span>{winners[0].final_score_formatted}%</span>
-                                    </div>
-                                    <p className="mt-0.5 text-[11px] text-emerald-800/80 dark:text-emerald-300/80">
-                                        Sum of the two 50% weighted components
-                                    </p>
-                                </div>
+                                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                                            <div className="font-bold text-emerald-800 dark:text-emerald-300 uppercase text-[10px]">
+                                                Step 3: Final Composite Score
+                                            </div>
+                                            <div className="mt-1 font-mono text-base font-black text-emerald-600 dark:text-emerald-400">
+                                                {winners[0].dc_weighted_score_formatted} + {winners[0].sh_weighted_score_formatted} = <span>{winners[0].final_score_formatted}%</span>
+                                            </div>
+                                            <p className="mt-0.5 text-[11px] text-emerald-800/80 dark:text-emerald-300/80">
+                                                Sum of the two 50% weighted components
+                                            </p>
+                                        </div>
+                                    </>
+                                ) : (
+                                    <>
+                                        <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                                            <div className="font-bold text-muted-foreground uppercase text-[10px]">
+                                                Step 1: Total Points Accumulated
+                                            </div>
+                                            <div className="mt-1 font-mono text-base font-extrabold text-foreground">
+                                                <span className="text-primary">{winners[0].sh_total_formatted} pts</span>
+                                            </div>
+                                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                                Sum of all valid ballot scores submitted by allowed voters
+                                            </p>
+                                        </div>
+
+                                        <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
+                                            <div className="font-bold text-muted-foreground uppercase text-[10px]">
+                                                Step 2: Total Participating Voters
+                                            </div>
+                                            <div className="mt-1 font-mono text-base font-extrabold text-foreground">
+                                                <span className="text-primary">{winners[0].sh_count} {winners[0].sh_count === 1 ? 'voter' : 'voters'}</span>
+                                            </div>
+                                            <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                                Number of voters who evaluated this category
+                                            </p>
+                                        </div>
+
+                                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3">
+                                            <div className="font-bold text-emerald-800 dark:text-emerald-300 uppercase text-[10px]">
+                                                Step 3: Final Score (100% Average)
+                                            </div>
+                                            <div className="mt-1 font-mono text-base font-black text-emerald-600 dark:text-emerald-400">
+                                                {winners[0].sh_total_formatted} ÷ {winners[0].sh_count || 1} = <span>{winners[0].final_score_formatted}%</span>
+                                            </div>
+                                            <p className="mt-0.5 text-[11px] text-emerald-800/80 dark:text-emerald-300/80">
+                                                Direct average across all allowed voters (100% weight)
+                                            </p>
+                                        </div>
+                                    </>
+                                )}
                             </div>
                         </div>
                     </div>
@@ -320,7 +375,9 @@ export default function TabulationBreakdown({
                                     Final Ranking & Computation Summary
                                 </h2>
                                 <p className="text-xs text-muted-foreground">
-                                    Composite ranking calculated from 50% Lead Evaluator ({evaluatorName}) and 50% other evaluators' average
+                                    {hasLead
+                                        ? `Composite ranking calculated from 50% Lead Evaluator (${evaluatorName}) and 50% other evaluators' average`
+                                        : 'Ranking calculated from 100% average of all allowed voters’ scores'}
                                 </p>
                             </div>
                         </div>
@@ -336,10 +393,20 @@ export default function TabulationBreakdown({
                                 <tr>
                                     <th className="px-4 py-3 text-center">Rank</th>
                                     <th className="px-4 py-3">Nominee</th>
-                                    <th className="px-4 py-3 text-right">Lead Raw Score</th>
-                                    <th className="px-4 py-3 text-right">Lead Weighted (50%)</th>
-                                    <th className="px-4 py-3 text-right">Others Avg Score</th>
-                                    <th className="px-4 py-3 text-right">Others Weighted (50%)</th>
+                                    {hasLead ? (
+                                        <>
+                                            <th className="px-4 py-3 text-right">Lead Raw Score</th>
+                                            <th className="px-4 py-3 text-right">Lead Weighted (50%)</th>
+                                            <th className="px-4 py-3 text-right">Others Avg Score</th>
+                                            <th className="px-4 py-3 text-right">Others Weighted (50%)</th>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <th className="px-4 py-3 text-right">Total Points</th>
+                                            <th className="px-4 py-3 text-right">Voters Count</th>
+                                            <th className="px-4 py-3 text-right">Voter Average (100%)</th>
+                                        </>
+                                    )}
                                     <th className="px-4 py-3 text-right font-black text-foreground">Final Score</th>
                                     <th className="px-4 py-3 text-center">Status</th>
                                 </tr>
@@ -393,25 +460,41 @@ export default function TabulationBreakdown({
                                                     </div>
                                                 </div>
                                             </td>
-                                            <td className="px-4 py-3.5 text-right font-mono">
-                                                {nominee.dc_has_voted ? `${nominee.dc_score_formatted} pts` : <span className="text-muted-foreground italic">Pending</span>}
-                                            </td>
-                                            <td className="px-4 py-3.5 text-right font-mono font-bold text-primary">
-                                                {nominee.dc_has_voted ? `${nominee.dc_weighted_score_formatted}%` : '0.00%'}
-                                            </td>
-                                            <td className="px-4 py-3.5 text-right font-mono">
-                                                {nominee.sh_count > 0 ? (
-                                                    <span>
-                                                        {nominee.sh_average_formatted} pts{' '}
-                                                        <span className="text-[10px] text-muted-foreground">({nominee.sh_count} voters)</span>
-                                                    </span>
-                                                ) : (
-                                                    <span className="text-muted-foreground italic">No votes</span>
-                                                )}
-                                            </td>
-                                            <td className="px-4 py-3.5 text-right font-mono font-bold text-primary">
-                                                {nominee.sh_weighted_score_formatted}%
-                                            </td>
+                                            {hasLead ? (
+                                                <>
+                                                    <td className="px-4 py-3.5 text-right font-mono">
+                                                        {nominee.dc_has_voted ? `${nominee.dc_score_formatted} pts` : <span className="text-muted-foreground italic">Pending</span>}
+                                                    </td>
+                                                    <td className="px-4 py-3.5 text-right font-mono font-bold text-primary">
+                                                        {nominee.dc_has_voted ? `${nominee.dc_weighted_score_formatted}%` : '0.00%'}
+                                                    </td>
+                                                    <td className="px-4 py-3.5 text-right font-mono">
+                                                        {nominee.sh_count > 0 ? (
+                                                            <span>
+                                                                {nominee.sh_average_formatted} pts{' '}
+                                                                <span className="text-[10px] text-muted-foreground">({nominee.sh_count} voters)</span>
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-muted-foreground italic">No votes</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="px-4 py-3.5 text-right font-mono font-bold text-primary">
+                                                        {nominee.sh_weighted_score_formatted}%
+                                                    </td>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <td className="px-4 py-3.5 text-right font-mono">
+                                                        {nominee.sh_total_formatted} pts
+                                                    </td>
+                                                    <td className="px-4 py-3.5 text-right font-mono">
+                                                        {nominee.sh_count} {nominee.sh_count === 1 ? 'voter' : 'voters'}
+                                                    </td>
+                                                    <td className="px-4 py-3.5 text-right font-mono font-bold text-primary">
+                                                        {nominee.sh_average_formatted}%
+                                                    </td>
+                                                </>
+                                            )}
                                             <td className="px-4 py-3.5 text-right font-mono text-sm font-black">
                                                 <span className={isWin ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground'}>
                                                     {nominee.final_score_formatted}%
@@ -445,10 +528,12 @@ export default function TabulationBreakdown({
                             </div>
                             <div>
                                 <h2 className="text-base font-bold text-foreground sm:text-lg">
-                                    Individual Scores per Section Head
+                                    {hasLead ? 'Individual Scores per Section Head / Voter' : 'Individual Scores per Allowed Voter'}
                                 </h2>
                                 <p className="text-xs text-muted-foreground">
-                                    Detailed scoring grid from all participating Section Heads across all nominees
+                                    {hasLead
+                                        ? 'Detailed scoring grid from all participating Section Heads across all nominees'
+                                        : 'Detailed scoring grid from all participating allowed voters across all nominees (100% weight)'}
                                 </p>
                             </div>
                         </div>
@@ -631,14 +716,18 @@ export default function TabulationBreakdown({
                             </div>
 
                             <div className="border-t border-border/60 bg-muted/20 p-3.5 text-xs text-muted-foreground">
-                                <span className="font-semibold text-foreground">Formula:</span> Average Score = Total of Evaluators' Scores ÷ Number of Evaluators. Weighted Score = Average Score × 50%.
+                                <span className="font-semibold text-foreground">Formula:</span>{' '}
+                                {hasLead
+                                    ? "Average Score = Total of Evaluators' Scores ÷ Number of Evaluators. Weighted Score = Average Score × 50%."
+                                    : 'Final Score = Total Score ÷ Number of Voters (100% General Average Score).'}
                             </div>
                         </>
                     )}
                 </div>
 
-                {/* Section 3: Lead Evaluator Score Breakdown (50% Weight) */}
-                <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+                {/* Section 3: Lead Evaluator Score Breakdown (50% Weight) - Only rendered when Lead Evaluator is configured */}
+                {hasLead && (
+                    <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
                     <div className="flex flex-col gap-2 border-b border-border/60 bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                         <div className="flex items-center gap-2.5">
                             <div className="rounded-lg bg-emerald-500/10 p-2 text-emerald-600">
@@ -724,7 +813,7 @@ export default function TabulationBreakdown({
                                     </thead>
                                     <tbody className="divide-y divide-border/40">
                                         {nominees.map((nominee) => {
-                                            const dcData = division_chief.scores[nominee.id];
+                                            const dcData = evaluator?.scores[nominee.id];
                                             const hasVoted = dcData && dcData.has_voted;
 
                                             return (
@@ -772,6 +861,7 @@ export default function TabulationBreakdown({
                         </>
                     )}
                 </div>
+                )}
 
                 {/* Section 4: Evaluation Criteria Reference Rubric */}
                 <div className="rounded-2xl border border-primary/20 bg-primary/[0.02] p-5">

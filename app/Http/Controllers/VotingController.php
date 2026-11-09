@@ -338,13 +338,20 @@ class VotingController extends Controller
         $nomineeTotal = 0.0;
 
         foreach ($criteria as $criterion) {
-            if (! isset($rawScores[$criterion->id]) && ! isset($rawScores[(string) $criterion->id])) {
-                return back()->with('error', "Please provide a score for criterion '{$criterion->name}'.");
+            $hasScore = isset($rawScores[$criterion->id]) || isset($rawScores[(string) $criterion->id]);
+            $val = $hasScore ? ($rawScores[$criterion->id] ?? $rawScores[(string) $criterion->id]) : null;
+
+            if ($val === null || $val === '') {
+                return back()->with('error', "Criterion '{$criterion->name}' is required.");
             }
 
-            $cScore = (float) ($rawScores[$criterion->id] ?? $rawScores[(string) $criterion->id]);
-            if ($cScore < 0 || $cScore > (float) $criterion->max_score) {
-                return back()->with('error', "Score for '{$criterion->name}' must be between 0 and {$criterion->max_score}.");
+            if (! is_numeric($val)) {
+                return back()->with('error', "Score for '{$criterion->name}' must be a valid number.");
+            }
+
+            $cScore = (float) $val;
+            if ($cScore < 1 || $cScore > (float) $criterion->max_score) {
+                return back()->with('error', "Score for '{$criterion->name}' must be between 1 and {$criterion->max_score}.");
             }
 
             $nomineeTotal += $cScore;
@@ -490,13 +497,20 @@ class VotingController extends Controller
             $breakdown = [];
 
             foreach ($criteria as $criterion) {
-                if (! isset($nomineeCriteriaScores[$criterion->id]) && ! isset($nomineeCriteriaScores[(string) $criterion->id])) {
-                    return back()->with('error', "Please provide a score for criterion '{$criterion->name}' for all nominees.");
+                $hasScore = isset($nomineeCriteriaScores[$criterion->id]) || isset($nomineeCriteriaScores[(string) $criterion->id]);
+                $val = $hasScore ? ($nomineeCriteriaScores[$criterion->id] ?? $nomineeCriteriaScores[(string) $criterion->id]) : null;
+
+                if ($val === null || $val === '') {
+                    return back()->with('error', "Criterion '{$criterion->name}' is required for all nominees.");
                 }
 
-                $cScore = (float) ($nomineeCriteriaScores[$criterion->id] ?? $nomineeCriteriaScores[(string) $criterion->id]);
-                if ($cScore < 0 || $cScore > (float) $criterion->max_score) {
-                    return back()->with('error', "Score for '{$criterion->name}' must be between 0 and {$criterion->max_score}.");
+                if (! is_numeric($val)) {
+                    return back()->with('error', "Score for '{$criterion->name}' must be a valid number.");
+                }
+
+                $cScore = (float) $val;
+                if ($cScore < 1 || $cScore > (float) $criterion->max_score) {
+                    return back()->with('error', "Score for '{$criterion->name}' must be between 1 and {$criterion->max_score}.");
                 }
 
                 $nomineeTotal += $cScore;
@@ -929,7 +943,7 @@ class VotingController extends Controller
             fputcsv($handle, ['Operational Status', strtoupper($event->computed_status)]);
             fputcsv($handle, ['Reveal Date', $event->reveal_date ? $event->reveal_date->format('Y-m-d') : 'To be announced']);
             fputcsv($handle, ['Generated At', now()->toDateTimeString()]);
-            fputcsv($handle, ['Scoring Formula', 'Final Score = (Division Chief Score * 0.50) + (Section Heads Average * 0.50)']);
+            fputcsv($handle, ['Scoring Formula', 'Final Score = (Lead Evaluator Score * 0.50) + (Other Evaluators Average * 0.50)']);
             if (! $shouldRevealNominee) {
                 fputcsv($handle, ['CONFIDENTIALITY NOTICE', 'Identities are sealed pending the official reveal date ceremony.']);
             }
@@ -945,9 +959,9 @@ class VotingController extends Controller
                     'Department / Designation',
                     'Area of Assignment / Organization',
                     'Final Composite Score (%)',
-                    'DC Weighted Score (50%)',
-                    'SH Weighted Score (50%)',
-                    'Section Heads Voters Count',
+                    'Lead Evaluator Weighted Score (50%)',
+                    'Other Evaluators Weighted Score (50%)',
+                    'Other Evaluators Voters Count',
                 ]);
 
                 foreach ($awards as $award) {
@@ -1084,7 +1098,9 @@ class VotingController extends Controller
     public function tabulationBreakdown(Request $request, VotingAward $award): Response
     {
         $user = $request->user();
-        $isAdminOrChief = $user && ($user->isAdmin() || (int) $user->id === 2);
+        $leadEvaluatorId = $award->getLeadEvaluatorId();
+        $leadEvaluator = $award->getLeadEvaluator();
+        $isAdminOrChief = $user && ($user->isAdmin() || ($leadEvaluatorId && (int) $user->id === (int) $leadEvaluatorId) || (int) $user->id === 2);
 
         $award->load([
             'criteria' => fn ($q) => $q->orderBy('display_order')->orderBy('id'),
@@ -1092,6 +1108,7 @@ class VotingController extends Controller
             'nominees.votes.scores.criterion',
             'votes.voter',
             'votes.scores.criterion',
+            'leadEvaluator',
         ]);
 
         $event = $award->event;
@@ -1137,32 +1154,31 @@ class VotingController extends Controller
             ];
         });
 
-        // 1. Division Chief (voter_id = 2) scores per nominee & criteria
-        $dcUser = User::find(2);
-        $dcNomineeScores = [];
+        // 1. Lead / 50% Evaluator scores per nominee & criteria
+        $leadNomineeScores = [];
         if ($canViewScores) {
             foreach ($award->nominees as $nominee) {
-                $dcVote = $nominee->votes->firstWhere('voter_id', 2);
+                $leadVote = $leadEvaluatorId ? $nominee->votes->firstWhere('voter_id', $leadEvaluatorId) : null;
                 $criteriaMap = [];
-                if ($dcVote) {
-                    foreach ($dcVote->scores as $scoreItem) {
+                if ($leadVote) {
+                    foreach ($leadVote->scores as $scoreItem) {
                         $criteriaMap[$scoreItem->voting_criterion_id] = (float) $scoreItem->score;
                     }
                 }
-                $dcNomineeScores[$nominee->id] = [
-                    'has_voted' => $dcVote !== null,
-                    'score' => $dcVote ? (float) $dcVote->score : null,
-                    'weighted_score' => $dcVote ? round((float) $dcVote->score * 0.50, 2) : 0.0,
+                $leadNomineeScores[$nominee->id] = [
+                    'has_voted' => $leadVote !== null,
+                    'score' => $leadVote ? (float) $leadVote->score : null,
+                    'weighted_score' => $leadVote ? round((float) $leadVote->score * 0.50, 2) : 0.0,
                     'criteria_scores' => $criteriaMap,
                 ];
             }
         }
 
-        // 2. Section Heads (voters with voter_id != 2)
+        // 2. Section Heads / Other Evaluators (voters with voter_id != leadEvaluatorId)
         $sectionHeadsList = [];
         if ($canViewScores) {
             $shVotesGroupedByVoter = $award->votes
-                ->where('voter_id', '!=', 2)
+                ->when($leadEvaluatorId, fn ($collection) => $collection->where('voter_id', '!=', $leadEvaluatorId))
                 ->groupBy('voter_id');
 
             $shIndex = 1;
@@ -1230,6 +1246,7 @@ class VotingController extends Controller
                 'status' => $award->status,
                 'nominees_count' => $award->nominees->count(),
                 'total_votes' => $award->nominees->sum(fn ($n) => $n->votes->sum('score')),
+                'lead_evaluator_id' => $award->lead_evaluator_id,
             ],
             'criteria' => $criteria->map(fn ($c) => [
                 'id' => $c->id,
@@ -1240,11 +1257,19 @@ class VotingController extends Controller
             ]),
             'total_criteria_score' => (float) $totalCriteriaScore,
             'nominees' => $nomineesList,
+            'lead_evaluator' => [
+                'id' => $leadEvaluator?->id ?? $leadEvaluatorId ?? 2,
+                'name' => $leadEvaluator ? $leadEvaluator->display_name : 'Lead Evaluator',
+                'email' => $leadEvaluator?->email,
+                'position' => $leadEvaluator?->position ?: 'Lead Evaluator (50%)',
+                'department' => $leadEvaluator?->section ?: ($leadEvaluator?->division ?: ($leadEvaluator?->department ?? 'Evaluator Office')),
+                'scores' => $leadNomineeScores,
+            ],
             'division_chief' => [
-                'id' => 2,
-                'name' => $dcUser ? $dcUser->display_name : 'Division Chief',
-                'department' => $dcUser?->department ?? 'Division Chief Office',
-                'scores' => $dcNomineeScores,
+                'id' => $leadEvaluator?->id ?? $leadEvaluatorId ?? 2,
+                'name' => $leadEvaluator ? $leadEvaluator->display_name : 'Lead Evaluator',
+                'department' => $leadEvaluator?->section ?: ($leadEvaluator?->division ?: ($leadEvaluator?->department ?? 'Evaluator Office')),
+                'scores' => $leadNomineeScores,
             ],
             'section_heads' => $sectionHeadsList,
             'section_heads_summary' => $shSummary,

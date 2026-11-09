@@ -249,5 +249,92 @@ class TabulationBreakdownTest extends TestCase
         $content = $response->streamedContent();
         $this->assertStringContainsString('Alice Wonder', $content);
     }
+
+    public function test_dynamic_lead_evaluator_scores_receive_50_percent_weight(): void
+    {
+        $customLead = User::factory()->create([
+            'id' => 88,
+            'voting_role' => 'voter',
+            'name' => 'Special Committee Chair',
+            'email' => 'chair@example.com',
+        ]);
+
+        $customAward = VotingAward::create([
+            'voting_event_id' => $this->event->id,
+            'name' => 'Distinguished Service Award',
+            'lead_evaluator_id' => $customLead->id,
+            'status' => 'active',
+            'display_order' => 2,
+        ]);
+
+        $criterion = VotingCriterion::create([
+            'voting_award_id' => $customAward->id,
+            'name' => 'Impact',
+            'max_score' => 100,
+            'display_order' => 1,
+        ]);
+
+        $nominee = VotingNominee::create([
+            'voting_award_id' => $customAward->id,
+            'name' => 'Bob Builder',
+            'status' => 'active',
+            'display_order' => 1,
+        ]);
+
+        // Custom Lead Evaluator votes 90 pts
+        $leadVote = VotingVote::create([
+            'voting_event_id' => $this->event->id,
+            'voting_award_id' => $customAward->id,
+            'voting_nominee_id' => $nominee->id,
+            'voter_id' => $customLead->id,
+            'score' => 90,
+            'voted_at' => now(),
+        ]);
+        VotingVoteScore::create([
+            'voting_vote_id' => $leadVote->id,
+            'voting_criterion_id' => $criterion->id,
+            'score' => 90,
+        ]);
+
+        // Regular voter votes 70 pts
+        $regVote = VotingVote::create([
+            'voting_event_id' => $this->event->id,
+            'voting_award_id' => $customAward->id,
+            'voting_nominee_id' => $nominee->id,
+            'voter_id' => $this->regularVoter->id,
+            'score' => 70,
+            'voted_at' => now(),
+        ]);
+        VotingVoteScore::create([
+            'voting_vote_id' => $regVote->id,
+            'voting_criterion_id' => $criterion->id,
+            'score' => 70,
+        ]);
+
+        // Verify model computation:
+        // Lead (90) * 0.50 = 45.0
+        // Other rater average (70) * 0.50 = 35.0
+        // Final score = 45.0 + 35.0 = 80.0
+        $nominees = $customAward->getSortedNominees();
+        $this->assertCount(1, $nominees);
+        $bob = $nominees[0];
+
+        $this->assertEquals(90.0, $bob->lead_score);
+        $this->assertEquals(45.0, $bob->lead_weighted_score);
+        $this->assertEquals(70.0, $bob->sh_average);
+        $this->assertEquals(35.0, $bob->sh_weighted_score);
+        $this->assertEquals(80.0, $bob->final_score);
+
+        // Verify dynamic lead evaluator has access to unmasked breakdown view
+        $response = $this->actingAs($customLead)->get("/tabulation-results/breakdown/{$customAward->id}");
+        $response->assertOk();
+        $response->assertInertia(fn (Assert $page) => $page
+            ->component('voting/tabulation-breakdown')
+            ->where('lead_evaluator.id', $customLead->id)
+            ->where('lead_evaluator.name', 'Special Committee Chair')
+            ->where('can_reveal', true)
+            ->where('nominees.0.name', 'Bob Builder')
+        );
+    }
 }
 

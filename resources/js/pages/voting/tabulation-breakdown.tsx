@@ -77,7 +77,8 @@ type SectionHeadVoter = {
 type DivisionChiefData = {
     id: number;
     name: string;
-    department: string;
+    department?: string | null;
+    position?: string | null;
     scores: Record<
         number,
         {
@@ -109,6 +110,7 @@ type Props = {
     criteria: CriterionItem[];
     total_criteria_score: number;
     nominees: NomineeItem[];
+    lead_evaluator?: DivisionChiefData;
     division_chief: DivisionChiefData;
     section_heads: SectionHeadVoter[];
     section_heads_summary: Record<
@@ -131,6 +133,7 @@ export default function TabulationBreakdown({
     criteria,
     total_criteria_score,
     nominees,
+    lead_evaluator,
     division_chief,
     section_heads,
     section_heads_summary,
@@ -138,6 +141,8 @@ export default function TabulationBreakdown({
     can_view_scores,
     is_reveal_date_reached = false,
 }: Props) {
+    const evaluator = lead_evaluator || division_chief;
+    const evaluatorName = evaluator?.name || 'Lead Evaluator';
     const [showCriteriaBreakdown, setShowCriteriaBreakdown] = useState(false);
 
     const canViewScores = Boolean(can_view_scores ?? (can_reveal || is_reveal_date_reached));
@@ -251,7 +256,7 @@ export default function TabulationBreakdown({
                                     </div>
                                 </div>
                                 <div className="text-[11px] font-semibold text-muted-foreground text-center sm:text-right">
-                                    50% Division Chief ({winners[0].dc_weighted_score_formatted}%) + 50% Section Heads ({winners[0].sh_weighted_score_formatted}%)
+                                    50% Lead Evaluator ({winners[0].dc_weighted_score_formatted}%) + 50% Other Evaluators ({winners[0].sh_weighted_score_formatted}%)
                                 </div>
                             </div>
                         </div>
@@ -265,25 +270,25 @@ export default function TabulationBreakdown({
                             <div className="mt-3 grid gap-3 sm:grid-cols-3 text-xs">
                                 <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
                                     <div className="font-bold text-muted-foreground uppercase text-[10px]">
-                                        Step 1: Division Chief Score (50%)
+                                        Step 1: Lead Evaluator Score (50%)
                                     </div>
                                     <div className="mt-1 font-mono text-base font-extrabold text-foreground">
                                         {winners[0].dc_score_formatted} × 50% = <span className="text-primary">{winners[0].dc_weighted_score_formatted}%</span>
                                     </div>
                                     <p className="mt-0.5 text-[11px] text-muted-foreground">
-                                        Raw DC rating out of 100 multiplied by 0.50
+                                        Raw rating from {evaluatorName} out of 100 multiplied by 0.50
                                     </p>
                                 </div>
 
                                 <div className="rounded-xl border border-border/60 bg-muted/30 p-3">
                                     <div className="font-bold text-muted-foreground uppercase text-[10px]">
-                                        Step 2: Section Heads' Average (50%)
+                                        Step 2: Other Evaluators' Average (50%)
                                     </div>
                                     <div className="mt-1 font-mono text-base font-extrabold text-foreground">
                                         {winners[0].sh_average_formatted} × 50% = <span className="text-primary">{winners[0].sh_weighted_score_formatted}%</span>
                                     </div>
                                     <p className="mt-0.5 text-[11px] text-muted-foreground">
-                                        ({winners[0].sh_total_formatted} total ÷ {winners[0].sh_count} Section Heads) × 0.50
+                                        ({winners[0].sh_total_formatted} total ÷ {winners[0].sh_count} Evaluators) × 0.50
                                     </p>
                                 </div>
 
@@ -315,7 +320,7 @@ export default function TabulationBreakdown({
                                     Final Ranking & Computation Summary
                                 </h2>
                                 <p className="text-xs text-muted-foreground">
-                                    Composite ranking calculated from 50% Division Chief and 50% Section Heads average
+                                    Composite ranking calculated from 50% Lead Evaluator ({evaluatorName}) and 50% other evaluators' average
                                 </p>
                             </div>
                         </div>
@@ -331,10 +336,10 @@ export default function TabulationBreakdown({
                                 <tr>
                                     <th className="px-4 py-3 text-center">Rank</th>
                                     <th className="px-4 py-3">Nominee</th>
-                                    <th className="px-4 py-3 text-right">DC Raw Score</th>
-                                    <th className="px-4 py-3 text-right">DC Weighted (50%)</th>
-                                    <th className="px-4 py-3 text-right">SH Average Score</th>
-                                    <th className="px-4 py-3 text-right">SH Weighted (50%)</th>
+                                    <th className="px-4 py-3 text-right">Lead Raw Score</th>
+                                    <th className="px-4 py-3 text-right">Lead Weighted (50%)</th>
+                                    <th className="px-4 py-3 text-right">Others Avg Score</th>
+                                    <th className="px-4 py-3 text-right">Others Weighted (50%)</th>
                                     <th className="px-4 py-3 text-right font-black text-foreground">Final Score</th>
                                     <th className="px-4 py-3 text-center">Status</th>
                                 </tr>
@@ -454,7 +459,7 @@ export default function TabulationBreakdown({
                                     {!is_reveal_date_reached && can_reveal && (
                                         <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
                                             <Shield className="h-3 w-3" />
-                                            Admin / DC View
+                                            Admin / Lead Evaluator View
                                         </span>
                                     )}
                                     <button
@@ -626,13 +631,13 @@ export default function TabulationBreakdown({
                             </div>
 
                             <div className="border-t border-border/60 bg-muted/20 p-3.5 text-xs text-muted-foreground">
-                                <span className="font-semibold text-foreground">Formula:</span> Average Score = Total of Section Heads' Scores ÷ Number of Section Heads. Weighted Score = Average Score × 50%.
+                                <span className="font-semibold text-foreground">Formula:</span> Average Score = Total of Evaluators' Scores ÷ Number of Evaluators. Weighted Score = Average Score × 50%.
                             </div>
                         </>
                     )}
                 </div>
 
-                {/* Section 3: Division Chief (User ID = 2) Score Breakdown (Matching Section 3 of Sample Matrix) */}
+                {/* Section 3: Lead Evaluator Score Breakdown (50% Weight) */}
                 <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
                     <div className="flex flex-col gap-2 border-b border-border/60 bg-muted/30 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                         <div className="flex items-center gap-2.5">
@@ -641,10 +646,10 @@ export default function TabulationBreakdown({
                             </div>
                             <div>
                                 <h2 className="text-base font-bold text-foreground sm:text-lg">
-                                    Division Chief (DC) Scores Breakdown
+                                    Lead Evaluator Scores Breakdown (50% Weight)
                                 </h2>
                                 <p className="text-xs text-muted-foreground">
-                                    Official ratings submitted by the Division Chief (User ID: 2 - {division_chief.name})
+                                    Official ratings submitted by the Lead Evaluator ({evaluatorName}{evaluator?.position ? ` - ${evaluator.position}` : ''})
                                 </p>
                             </div>
                         </div>
@@ -656,7 +661,7 @@ export default function TabulationBreakdown({
                             {!is_reveal_date_reached && can_reveal && (
                                 <span className="inline-flex items-center gap-1 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary">
                                     <Shield className="h-3 w-3" />
-                                    Admin / DC View
+                                    Admin / Lead Evaluator View
                                 </span>
                             )}
                             {!canViewScores && (
@@ -674,10 +679,10 @@ export default function TabulationBreakdown({
                                 <Lock className="h-6 w-6" />
                             </div>
                             <h3 className="text-base font-bold text-foreground sm:text-lg">
-                                Division Chief Evaluation Breakdown is Sealed
+                                Lead Evaluator Evaluation Breakdown is Sealed
                             </h3>
                             <p className="mt-1.5 max-w-md text-xs sm:text-sm text-muted-foreground leading-relaxed">
-                                The Division Chief's itemized criteria evaluations, rubric sub-scores, and weighted ratings are strictly confidential and will be officially unlocked on the scheduled reveal date.
+                                The Lead Evaluator's itemized criteria evaluations, rubric sub-scores, and weighted ratings are strictly confidential and will be officially unlocked on the scheduled reveal date.
                             </p>
                             {event.reveal_date ? (
                                 <div className="mt-4 inline-flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2 text-xs font-semibold text-amber-800 dark:text-amber-300">
@@ -762,7 +767,7 @@ export default function TabulationBreakdown({
                             </div>
 
                             <div className="border-t border-border/60 bg-muted/20 p-3.5 text-xs text-muted-foreground">
-                                <span className="font-semibold text-foreground">Formula:</span> DC Weighted Score = DC Total Score × 50%.
+                                <span className="font-semibold text-foreground">Formula:</span> Lead Weighted Score = Lead Total Score × 50%.
                             </div>
                         </>
                     )}

@@ -18,6 +18,7 @@ import {
     Percent,
     Plus,
     Search,
+    Shield,
     ShieldAlert,
     ShieldCheck,
     Sliders,
@@ -30,6 +31,7 @@ import {
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import Select2Evaluator from '@/components/ui/select2-evaluator';
 import AppLayout from '@/layouts/app-layout';
 
 type NomineeItem = {
@@ -52,6 +54,14 @@ type AwardItem = {
     starts_at: string | null;
     ends_at: string | null;
     status: string;
+    lead_evaluator_id?: number | null;
+    lead_evaluator?: {
+        id: number;
+        name: string;
+        email?: string;
+        position?: string | null;
+        department?: string | null;
+    } | null;
     allow_vote_changes: boolean | null;
     results_visibility: string;
     display_order: number;
@@ -161,13 +171,23 @@ export default function EventShow({ event, all_users = [] }: Props) {
     });
 
     // Award Form
-    const [awardForm, setAwardForm] = useState({
+    const [awardForm, setAwardForm] = useState<{
+        name: string;
+        description: string;
+        starts_at: string;
+        ends_at: string;
+        status: string;
+        results_visibility: string;
+        lead_evaluator_id: number | null;
+        display_order: number;
+    }>({
         name: '',
         description: '',
         starts_at: '',
         ends_at: '',
         status: 'active',
         results_visibility: 'inherit',
+        lead_evaluator_id: null,
         display_order: 0,
     });
 
@@ -312,6 +332,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
                     ends_at: '',
                     status: 'active',
                     results_visibility: 'inherit',
+                    lead_evaluator_id: null,
                     display_order: 0,
                 });
             },
@@ -783,6 +804,7 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                         ends_at: '',
                                         status: 'active',
                                         results_visibility: 'inherit',
+                                        lead_evaluator_id: null,
                                         display_order: event.awards.length + 1,
                                     });
                                     setIsAddAwardOpen(true);
@@ -933,6 +955,11 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                                             <Sliders className="h-3 w-3" />
                                                             Criteria: {award.criteria?.length || 0} ({award.total_criteria_score || 0}%)
                                                         </span>
+                                                        <span>•</span>
+                                                        <span className="inline-flex items-center gap-1 rounded-md bg-purple-500/10 px-2 py-0.5 text-[11px] font-semibold text-purple-700 dark:text-purple-300">
+                                                            <Shield className="h-3 w-3" />
+                                                            50% Evaluator: {award.lead_evaluator?.name || 'Default (Division Chief)'}
+                                                        </span>
                                                     </div>
                                                 </div>
                                             </div>
@@ -975,6 +1002,8 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                                             status: award.status,
                                                             results_visibility:
                                                                 award.results_visibility,
+                                                            lead_evaluator_id:
+                                                                award.lead_evaluator_id ?? null,
                                                             display_order:
                                                                 award.display_order,
                                                         });
@@ -1800,6 +1829,25 @@ export default function EventShow({ event, all_users = [] }: Props) {
                                     }
                                     className="w-full rounded-lg border border-border bg-background px-3 py-2 text-xs text-foreground focus:ring-2 focus:ring-primary/20 focus:outline-none"
                                 />
+                            </div>
+
+                            <div>
+                                <label className="mb-1 block text-xs font-semibold text-foreground">
+                                    50% Weighted Evaluator (Lead / Chief Evaluator)
+                                </label>
+                                <Select2Evaluator
+                                    users={all_users}
+                                    value={awardForm.lead_evaluator_id}
+                                    onChange={(userId) =>
+                                        setAwardForm({
+                                            ...awardForm,
+                                            lead_evaluator_id: userId,
+                                        })
+                                    }
+                                />
+                                <p className="mt-1.5 text-[11px] text-muted-foreground">
+                                    Assign any user to evaluate this award with a 50% weight. The scores of all other voters will be averaged for the remaining 50%.
+                                </p>
                             </div>
 
                             <div className="grid gap-4 sm:grid-cols-2">

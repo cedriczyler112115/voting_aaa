@@ -93,7 +93,7 @@ export default function VotingResults({ event, awards }: Props) {
                     </h1>
                     <p className="mt-2 max-w-3xl text-sm leading-relaxed text-muted-foreground">
                         {event.description ||
-                            'Official final scores computed via criteria scoring: 50% Division Chief (DC) rating + 50% Section Heads average rating.'}
+                            'Official final scores computed via criteria scoring: 50% Lead Evaluator rating + 50% other evaluators average rating.'}
                     </p>
                 </div>
 
@@ -216,10 +216,10 @@ export default function VotingResults({ event, awards }: Props) {
 
                                                     {/* 50/50 Breakdown & Final Score */}
                                                     <div className="flex flex-wrap items-center gap-4 sm:justify-end">
-                                                        {/* DC Component */}
+                                                        {/* Lead Evaluator Component */}
                                                         <div className="rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1.5 text-center text-xs">
                                                             <div className="text-[10px] font-semibold text-muted-foreground">
-                                                                DC Score (50%)
+                                                                Lead (50%)
                                                             </div>
                                                             <div className="font-bold text-foreground">
                                                                 {nominee.dc_has_voted ? (
@@ -237,10 +237,10 @@ export default function VotingResults({ event, awards }: Props) {
                                                             </div>
                                                         </div>
 
-                                                        {/* Section Heads Component */}
+                                                        {/* Other Evaluators Component */}
                                                         <div className="rounded-lg border border-border/60 bg-muted/30 px-2.5 py-1.5 text-center text-xs">
                                                             <div className="text-[10px] font-semibold text-muted-foreground">
-                                                                SH Average (50%)
+                                                                Others (50%)
                                                             </div>
                                                             <div className="font-bold text-foreground">
                                                                 {nominee.sh_count > 0 ? (

@@ -44,6 +44,7 @@ class VotingAward extends Model
         'allow_vote_changes',
         'results_visibility',
         'status',
+        'lead_evaluator_id',
         'display_order',
     ];
 
@@ -53,6 +54,7 @@ class VotingAward extends Model
             'starts_at' => 'datetime',
             'ends_at' => 'datetime',
             'allow_vote_changes' => 'boolean',
+            'lead_evaluator_id' => 'integer',
             'display_order' => 'integer',
         ];
     }
@@ -63,6 +65,42 @@ class VotingAward extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(VotingEvent::class, 'voting_event_id');
+    }
+
+    /**
+     * @return BelongsTo<User, $this>
+     */
+    public function leadEvaluator(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'lead_evaluator_id');
+    }
+
+    /**
+     * Get the designated 50% lead evaluator ID for this award.
+     * If explicitly configured on the award, returns that user ID.
+     * Otherwise defaults to user ID 2 as fallback.
+     */
+    public function getLeadEvaluatorId(): ?int
+    {
+        if ($this->lead_evaluator_id) {
+            return (int) $this->lead_evaluator_id;
+        }
+
+        return 2;
+    }
+
+    /**
+     * Get the designated 50% lead evaluator User model for this award.
+     */
+    public function getLeadEvaluator(): ?User
+    {
+        if ($this->relationLoaded('leadEvaluator') && $this->leadEvaluator) {
+            return $this->leadEvaluator;
+        }
+
+        $id = $this->getLeadEvaluatorId();
+
+        return $id ? User::find($id) : null;
     }
 
     /**
@@ -170,7 +208,7 @@ class VotingAward extends Model
     }
 
     /**
-     * Get nominees sorted and ranked based on 50% DC (user_id=2) + 50% Section Heads average formula.
+     * Get nominees sorted and ranked based on 50% Lead/Designated Evaluator + 50% Other Evaluators average formula.
      * Nominees with the same final score share the same rank and are marked as tied.
      *
      * @return \Illuminate\Support\Collection<int, VotingNominee>
@@ -184,31 +222,36 @@ class VotingAward extends Model
             return collect();
         }
 
+        $leadEvaluatorId = $this->getLeadEvaluatorId();
+
         // Pre-compute vote stats for sorting performance
         $stats = [];
         foreach ($nominees as $nominee) {
             $votes = $nominee->relationLoaded('votes') ? $nominee->votes : $nominee->votes()->get();
 
-            // Division Chief (user.id = 2)
-            $dcVote = $votes->firstWhere('voter_id', 2);
-            $dcScore = $dcVote ? (float) $dcVote->score : 0.0;
-            $dcWeightedScore = round($dcScore * 0.50, 2);
-            $dcHasVoted = $dcVote !== null;
+            // 50% Weighted Lead Evaluator
+            $leadVote = $leadEvaluatorId ? $votes->firstWhere('voter_id', $leadEvaluatorId) : null;
+            $leadScore = $leadVote ? (float) $leadVote->score : 0.0;
+            $leadWeightedScore = round($leadScore * 0.50, 2);
+            $leadHasVoted = $leadVote !== null;
 
-            // Section Heads / Other Voters (voter_id != 2)
-            $shVotes = $votes->where('voter_id', '!=', 2);
+            // Section Heads / Other Evaluators
+            $shVotes = $leadEvaluatorId ? $votes->where('voter_id', '!=', $leadEvaluatorId) : $votes;
             $shCount = $shVotes->count();
             $shTotal = (float) $shVotes->sum('score');
             $shAverage = $shCount > 0 ? round($shTotal / $shCount, 2) : 0.0;
             $shWeightedScore = round($shAverage * 0.50, 2);
 
-            // Final Score = (DC Score * 0.50) + (Section Heads Average * 0.50)
-            $finalScore = round($dcWeightedScore + $shWeightedScore, 2);
+            // Final Score = (Lead Evaluator Score * 0.50) + (Other Evaluators Average * 0.50)
+            $finalScore = round($leadWeightedScore + $shWeightedScore, 2);
 
             $stats[$nominee->id] = [
-                'dc_score' => $dcScore,
-                'dc_weighted_score' => $dcWeightedScore,
-                'dc_has_voted' => $dcHasVoted,
+                'dc_score' => $leadScore,
+                'dc_weighted_score' => $leadWeightedScore,
+                'dc_has_voted' => $leadHasVoted,
+                'lead_score' => $leadScore,
+                'lead_weighted_score' => $leadWeightedScore,
+                'lead_has_voted' => $leadHasVoted,
                 'sh_count' => $shCount,
                 'sh_total' => $shTotal,
                 'sh_average' => $shAverage,
@@ -228,12 +271,12 @@ class VotingAward extends Model
                 return $statsB['final_score'] <=> $statsA['final_score'];
             }
 
-            // 2. Division Chief score descending
-            if ($statsA['dc_score'] !== $statsB['dc_score']) {
-                return $statsB['dc_score'] <=> $statsA['dc_score'];
+            // 2. Lead Evaluator score descending
+            if ($statsA['lead_score'] !== $statsB['lead_score']) {
+                return $statsB['lead_score'] <=> $statsA['lead_score'];
             }
 
-            // 3. Section heads average descending
+            // 3. Section heads / other raters average descending
             if ($statsA['sh_average'] !== $statsB['sh_average']) {
                 return $statsB['sh_average'] <=> $statsA['sh_average'];
             }
@@ -253,6 +296,9 @@ class VotingAward extends Model
             $nominee->dc_score = $currStat['dc_score'];
             $nominee->dc_weighted_score = $currStat['dc_weighted_score'];
             $nominee->dc_has_voted = $currStat['dc_has_voted'];
+            $nominee->lead_score = $currStat['lead_score'];
+            $nominee->lead_weighted_score = $currStat['lead_weighted_score'];
+            $nominee->lead_has_voted = $currStat['lead_has_voted'];
             $nominee->sh_count = $currStat['sh_count'];
             $nominee->sh_total = $currStat['sh_total'];
             $nominee->sh_average = $currStat['sh_average'];

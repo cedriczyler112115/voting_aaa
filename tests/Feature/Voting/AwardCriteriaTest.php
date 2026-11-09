@@ -219,4 +219,126 @@ class AwardCriteriaTest extends TestCase
         $response = $this->get(route('voting.show', $this->event->slug));
         $response->assertOk();
     }
+
+    public function test_voter_cannot_save_criterion_score_below_one(): void
+    {
+        $criterion = VotingCriterion::create([
+            'voting_event_id' => $this->event->id,
+            'voting_award_id' => $this->awardA->id,
+            'name' => 'Work Quality',
+            'max_score' => 50,
+            'display_order' => 1,
+        ]);
+
+        $nominee = VotingNominee::create([
+            'voting_award_id' => $this->awardA->id,
+            'name' => 'Jane Doe',
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($this->voter);
+
+        // Attempting to submit a score of 0 (below minimum of 1)
+        $response = $this->post('/voting/save-nominee-score', [
+            'voting_award_id' => $this->awardA->id,
+            'voting_nominee_id' => $nominee->id,
+            'scores' => [
+                $criterion->id => 0,
+            ],
+        ]);
+
+        $response->assertSessionHas('error', "Score for 'Work Quality' must be between 1 and 50.");
+        $this->assertDatabaseMissing('voting_votes', [
+            'voter_id' => $this->voter->id,
+            'voting_nominee_id' => $nominee->id,
+        ]);
+    }
+
+    public function test_voter_cannot_save_when_criterion_is_missing(): void
+    {
+        $criterion1 = VotingCriterion::create([
+            'voting_event_id' => $this->event->id,
+            'voting_award_id' => $this->awardA->id,
+            'name' => 'Technical Competence',
+            'max_score' => 50,
+            'display_order' => 1,
+        ]);
+        $criterion2 = VotingCriterion::create([
+            'voting_event_id' => $this->event->id,
+            'voting_award_id' => $this->awardA->id,
+            'name' => 'Communication',
+            'max_score' => 50,
+            'display_order' => 2,
+        ]);
+
+        $nominee = VotingNominee::create([
+            'voting_award_id' => $this->awardA->id,
+            'name' => 'Jane Doe',
+            'status' => 'active',
+        ]);
+
+        $this->actingAs($this->voter);
+
+        // Attempting to submit without criterion2
+        $response = $this->post('/voting/save-nominee-score', [
+            'voting_award_id' => $this->awardA->id,
+            'voting_nominee_id' => $nominee->id,
+            'scores' => [
+                $criterion1->id => 45,
+            ],
+        ]);
+
+        $response->assertSessionHas('error', "Criterion 'Communication' is required.");
+        $this->assertDatabaseMissing('voting_votes', [
+            'voter_id' => $this->voter->id,
+            'voting_nominee_id' => $nominee->id,
+        ]);
+    }
+
+    public function test_admin_can_assign_dynamic_lead_evaluator_when_creating_and_updating_award(): void
+    {
+        $this->actingAs($this->admin);
+
+        $customEvaluator = User::factory()->create([
+            'name' => 'Dr. Jane Smith',
+            'email' => 'jane@example.com',
+        ]);
+
+        // 1. Create award with lead_evaluator_id
+        $createResponse = $this->post(route('admin.events.awards.store', $this->event), [
+            'name' => 'Research Impact Award',
+            'status' => 'active',
+            'results_visibility' => 'inherit',
+            'lead_evaluator_id' => $customEvaluator->id,
+            'display_order' => 5,
+        ]);
+
+        $createResponse->assertSessionHas('success');
+        $this->assertDatabaseHas('voting_awards', [
+            'name' => 'Research Impact Award',
+            'lead_evaluator_id' => $customEvaluator->id,
+        ]);
+
+        $award = VotingAward::where('name', 'Research Impact Award')->firstOrFail();
+        $this->assertEquals($customEvaluator->id, $award->getLeadEvaluatorId());
+        $this->assertEquals('Dr. Jane Smith', $award->getLeadEvaluator()?->name);
+
+        // 2. Update existing award lead_evaluator_id
+        $newEvaluator = User::factory()->create([
+            'name' => 'Prof. Alan Turing',
+            'email' => 'alan@example.com',
+        ]);
+
+        $updateResponse = $this->put(route('admin.awards.update', $award), [
+            'name' => 'Research Impact Award (Updated)',
+            'status' => 'active',
+            'results_visibility' => 'inherit',
+            'lead_evaluator_id' => $newEvaluator->id,
+            'display_order' => 5,
+        ]);
+
+        $updateResponse->assertSessionHas('success');
+        $this->assertEquals($newEvaluator->id, $award->fresh()->getLeadEvaluatorId());
+        $this->assertEquals('Prof. Alan Turing', $award->fresh()->getLeadEvaluator()?->name);
+    }
 }

@@ -110,6 +110,7 @@ class VotingEventController extends Controller
                     ->orderBy('display_order')
                     ->orderBy('id')
                     ->with([
+                        'leadEvaluator',
                         'criteria' => function ($cq) {
                             $cq->orderBy('display_order')->orderBy('id');
                         },
@@ -188,6 +189,14 @@ class VotingEventController extends Controller
                     'starts_at' => $award->starts_at?->format('Y-m-d\TH:i'),
                     'ends_at' => $award->ends_at?->format('Y-m-d\TH:i'),
                     'status' => $award->status,
+                    'lead_evaluator_id' => $award->lead_evaluator_id,
+                    'lead_evaluator' => $award->leadEvaluator ? [
+                        'id' => $award->leadEvaluator->id,
+                        'name' => $award->leadEvaluator->display_name,
+                        'email' => $award->leadEvaluator->email,
+                        'position' => $award->leadEvaluator->position,
+                        'department' => $award->leadEvaluator->section ?: ($award->leadEvaluator->division ?: $award->leadEvaluator->department),
+                    ] : null,
                     'allow_vote_changes' => $award->allow_vote_changes,
                     'results_visibility' => $award->results_visibility,
                     'display_order' => $award->display_order,

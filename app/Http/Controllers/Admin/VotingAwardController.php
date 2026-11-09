@@ -22,6 +22,7 @@ class VotingAwardController extends Controller
             'allow_vote_changes' => ['nullable', 'boolean'],
             'results_visibility' => ['required', 'in:inherit,public,voters_only,after_closing,hidden'],
             'status' => ['required', 'in:active,inactive'],
+            'lead_evaluator_id' => ['nullable', 'integer', 'exists:users,id'],
             'display_order' => ['integer', 'min:0'],
         ]);
 
@@ -50,6 +51,7 @@ class VotingAwardController extends Controller
             'allow_vote_changes' => ['nullable', 'boolean'],
             'results_visibility' => ['required', 'in:inherit,public,voters_only,after_closing,hidden'],
             'status' => ['required', 'in:active,inactive'],
+            'lead_evaluator_id' => ['nullable', 'integer', 'exists:users,id'],
             'display_order' => ['integer', 'min:0'],
         ]);
 

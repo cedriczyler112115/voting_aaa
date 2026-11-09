@@ -212,13 +212,17 @@ export default function VotingShow({
         const awardCriteria = getAwardCriteria(award);
         const cleaned: Record<number, number> = {};
 
-        awardCriteria.forEach((c) => {
+        for (const c of awardCriteria) {
             const raw = modalCriterionScores[c.id];
-            let val = parseFloat(raw || '0');
-            if (isNaN(val) || val < 0) val = 0;
-            if (val > c.max_score) val = c.max_score;
+            if (raw === undefined || raw === null || String(raw).trim() === '') {
+                return;
+            }
+            const val = parseFloat(String(raw));
+            if (isNaN(val) || val < 1 || val > c.max_score) {
+                return;
+            }
             cleaned[c.id] = val;
-        });
+        }
 
         setSavingNominee(true);
         router.post(
@@ -256,7 +260,7 @@ export default function VotingShow({
         );
     };
 
-    // Check if nominee has scores recorded for all criteria
+    // Check if nominee has scores recorded for all criteria (all required, minimum of 1)
     const isNomineeComplete = (
         award: AwardItem,
         nomineeId: number,
@@ -269,7 +273,9 @@ export default function VotingShow({
             (c) =>
                 nomineeCriteria[c.id] !== undefined &&
                 nomineeCriteria[c.id] !== null &&
-                !isNaN(nomineeCriteria[c.id]),
+                !isNaN(nomineeCriteria[c.id]) &&
+                nomineeCriteria[c.id] >= 1 &&
+                nomineeCriteria[c.id] <= c.max_score,
         );
     };
 
@@ -389,7 +395,7 @@ export default function VotingShow({
                             </h1>
                             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
                                 {event.description ||
-                                    'Score nominees across the evaluation criteria. Final scores are weighted 50% from the Division Chief and 50% from Section Heads.'}
+                                    'Score nominees across the evaluation criteria. Final scores are weighted 50% from the designated Lead Evaluator and 50% from other evaluators.'}
                             </p>
                         </div>
 
@@ -766,7 +772,7 @@ export default function VotingShow({
                         {/* Criteria Inputs */}
                         <div className="mt-4 flex flex-col gap-3">
                             <p className="text-xs text-muted-foreground">
-                                Rate this nominee for each criterion from 0 up to its maximum score for the <span className="font-semibold text-foreground">"{scoringModal?.award.name}"</span> category. When saved, the score is saved directly to the database.
+                                Rate this nominee for each criterion (<span className="font-semibold text-foreground">all criteria required, minimum score of 1</span> up to each criterion's maximum score) for the <span className="font-semibold text-foreground">"{scoringModal?.award.name}"</span> category. When saved, the score is saved directly to the database.
                             </p>
 
                             {getAwardCriteria(scoringModal?.award).length === 0 ? (
@@ -780,26 +786,32 @@ export default function VotingShow({
                                 </div>
                             ) : (
                                 getAwardCriteria(scoringModal?.award).map((criterion, idx) => {
-                                    const currentVal = modalCriterionScores[criterion.id] ?? '';
-                                    const numVal = parseFloat(currentVal || '0') || 0;
-                                    const isOver = numVal > criterion.max_score;
+                                    const rawVal = modalCriterionScores[criterion.id] ?? '';
+                                    const isEmpty = rawVal.trim() === '';
+                                    const numVal = parseFloat(rawVal);
+                                    const isUnderMin = !isEmpty && (isNaN(numVal) || numVal < 1);
+                                    const isOverMax = !isEmpty && numVal > criterion.max_score;
+                                    const isError = isUnderMin || isOverMax;
 
                                     return (
                                         <div
                                             key={criterion.id}
-                                            className={`flex flex-col gap-2 rounded-xl border p-3.5 sm:flex-row sm:items-center sm:justify-between ${
-                                                isOver
+                                            className={`flex flex-col gap-2 rounded-xl border p-3.5 sm:flex-row sm:items-center sm:justify-between transition-colors ${
+                                                isError
                                                     ? 'border-red-500/50 bg-red-500/5'
                                                     : 'border-border/70 bg-background/50'
                                             }`}
                                         >
                                             <div className="min-w-0 flex-1">
-                                                <div className="flex items-center gap-2">
+                                                <div className="flex items-center gap-1.5">
                                                     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-[10px] font-bold text-primary">
                                                         {idx + 1}
                                                     </span>
                                                     <span className="text-xs font-bold text-foreground">
                                                         {criterion.name}
+                                                    </span>
+                                                    <span className="text-xs font-bold text-red-500" title="Required">
+                                                        *
                                                     </span>
                                                 </div>
                                                 {criterion.description && (
@@ -809,32 +821,45 @@ export default function VotingShow({
                                                 )}
                                             </div>
 
-                                            <div className="flex items-center gap-2 pl-7 sm:pl-0">
-                                                <div className="relative">
-                                                    <input
-                                                        type="number"
-                                                        min={0}
-                                                        max={criterion.max_score}
-                                                        step={0.5}
-                                                        placeholder="0"
-                                                        value={currentVal}
-                                                        onChange={(e) => {
-                                                            const val = e.target.value;
-                                                            setModalCriterionScores((prev) => ({
-                                                                ...prev,
-                                                                [criterion.id]: val,
-                                                            }));
-                                                        }}
-                                                        className={`w-24 rounded-lg border bg-card px-2.5 py-1.5 text-center text-sm font-bold text-foreground focus:ring-2 focus:ring-primary/20 focus:outline-none ${
-                                                            isOver
-                                                                ? 'border-red-500 text-red-600'
-                                                                : 'border-border focus:border-primary'
-                                                        }`}
-                                                    />
+                                            <div className="flex flex-col items-end gap-1 pl-7 sm:pl-0">
+                                                <div className="flex items-center gap-2">
+                                                    <div className="relative">
+                                                        <input
+                                                            type="number"
+                                                            min={1}
+                                                            max={criterion.max_score}
+                                                            step={0.5}
+                                                            placeholder=""
+                                                            required
+                                                            value={rawVal}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value;
+                                                                setModalCriterionScores((prev) => ({
+                                                                    ...prev,
+                                                                    [criterion.id]: val,
+                                                                }));
+                                                            }}
+                                                            className={`w-24 rounded-lg border bg-card px-2.5 py-1.5 text-center text-sm font-bold text-foreground focus:ring-2 focus:outline-none ${
+                                                                isError
+                                                                    ? 'border-red-500 text-red-600 focus:border-red-500 focus:ring-red-500/20'
+                                                                    : 'border-border focus:border-primary focus:ring-primary/20'
+                                                            }`}
+                                                        />
+                                                    </div>
+                                                    <span className="text-xs font-bold text-muted-foreground shrink-0">
+                                                        / {criterion.max_score} pts
+                                                    </span>
                                                 </div>
-                                                <span className="text-xs font-bold text-muted-foreground shrink-0">
-                                                    / {criterion.max_score} pts
-                                                </span>
+                                                {isUnderMin && (
+                                                    <span className="text-[10px] font-semibold text-red-500">
+                                                        Minimum score is 1
+                                                    </span>
+                                                )}
+                                                {isOverMax && (
+                                                    <span className="text-[10px] font-semibold text-red-500">
+                                                        Maximum is {criterion.max_score} pts
+                                                    </span>
+                                                )}
                                             </div>
                                         </div>
                                     );
@@ -855,10 +880,31 @@ export default function VotingShow({
                                 modalTotalMax > 0
                                     ? Math.round((total / modalTotalMax) * 10000) / 100
                                     : 0;
-                            const hasErrors = modalCriteria.some((c) => {
-                                const v = parseFloat(modalCriterionScores[c.id] || '0');
-                                return v < 0 || v > c.max_score;
+
+                            const hasEmptyScores = modalCriteria.some((c) => {
+                                const raw = modalCriterionScores[c.id];
+                                return raw === undefined || raw === null || String(raw).trim() === '';
                             });
+
+                            const hasUnderMinScores = modalCriteria.some((c) => {
+                                const raw = modalCriterionScores[c.id];
+                                if (raw === undefined || raw === null || String(raw).trim() === '') return false;
+                                const v = parseFloat(String(raw));
+                                return isNaN(v) || v < 1;
+                            });
+
+                            const hasOverMaxScores = modalCriteria.some((c) => {
+                                const raw = modalCriterionScores[c.id];
+                                if (raw === undefined || raw === null || String(raw).trim() === '') return false;
+                                const v = parseFloat(String(raw));
+                                return !isNaN(v) && v > c.max_score;
+                            });
+
+                            const canSave =
+                                modalCriteria.length > 0 &&
+                                !hasEmptyScores &&
+                                !hasUnderMinScores &&
+                                !hasOverMaxScores;
 
                             return (
                                 <div className="mt-5 rounded-xl border border-primary/20 bg-primary/[0.03] p-4">
@@ -879,7 +925,19 @@ export default function VotingShow({
                                         </div>
                                     </div>
 
-                                    {hasErrors && (
+                                    {hasEmptyScores && (
+                                        <p className="mt-2 text-xs font-semibold text-amber-600 dark:text-amber-400">
+                                            All criteria fields are required. Please enter a score of at least 1 for each criterion.
+                                        </p>
+                                    )}
+
+                                    {hasUnderMinScores && (
+                                        <p className="mt-2 text-xs font-semibold text-red-500">
+                                            Each criterion score must be at least 1 (minimum value of 1).
+                                        </p>
+                                    )}
+
+                                    {hasOverMaxScores && (
                                         <p className="mt-2 text-xs font-semibold text-red-500">
                                             Some scores exceed the maximum allowed for that criterion.
                                         </p>
@@ -896,7 +954,7 @@ export default function VotingShow({
                                         </button>
                                         <button
                                             type="button"
-                                            disabled={modalCriteria.length === 0 || hasErrors || savingNominee}
+                                            disabled={!canSave || savingNominee}
                                             onClick={handleSaveModalScores}
                                             className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-5 py-2 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90 disabled:opacity-50"
                                         >
